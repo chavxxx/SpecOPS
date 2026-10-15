@@ -27,13 +27,29 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing WISPnet Security Platform Database...")
     db = get_db()
     
+    # Purge any legacy simulated flow records
+    try:
+        with db._get_connection() as conn:
+            c = conn.cursor()
+            c.execute("DELETE FROM flow_records WHERE flow_id LIKE 'flow-sim-%';")
+            conn.commit()
+    except Exception as e:
+        logger.debug(f"Flow purge note: {e}")
+
     logger.info("Starting Security Background Telemetry & Scan Worker...")
     worker = get_security_worker()
     await worker.start(interval_seconds=10)
+
+    logger.info("Starting Real-Time Carrier NetFlow / IPFIX UDP Collector (Port 2055)...")
+    from app.services.netflow_collector import get_netflow_collector
+    collector = get_netflow_collector()
+    await collector.start()
     
     yield
     
     # Shutdown
+    logger.info("Stopping NetFlow Collector...")
+    await collector.stop()
     logger.info("Stopping Security Background Worker...")
     await worker.stop()
     logger.info("WISPnet Security Platform shut down cleanly.")

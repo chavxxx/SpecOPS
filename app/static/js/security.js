@@ -847,25 +847,25 @@ async function loadTrafficAnalytics(isManual = false) {
   }
 }
 
-// SIMULATE CARRIER FLOWS TRIGGER
-async function simulateTrafficFlows() {
-  const btn = document.getElementById("btn-sec-traffic-simulate");
+// SYNC LIVE ROUTER TRAFFIC & HARDWARE QUEUES
+async function syncRouterTraffic() {
+  const btn = document.getElementById("btn-sec-traffic-sync") || document.getElementById("btn-sec-traffic-simulate");
   if (btn) {
     btn.disabled = true;
-    btn.innerHTML = `<i data-lucide="refresh-cw" class="w-3.5 h-3.5 animate-spin"></i> Generating Flows...`;
+    btn.innerHTML = `<i data-lucide="refresh-cw" class="w-3.5 h-3.5 animate-spin"></i> Syncing Hardware...`;
     if (window.lucide) lucide.createIcons();
   }
 
   try {
     const authHeaders = typeof getAuthHeaders === "function" ? getAuthHeaders() : {};
-    const res = await fetch("/api/security/traffic/simulate?count=160", {
+    const res = await fetch("/api/security/traffic/sync-router-traffic", {
       method: "POST",
       headers: { ...authHeaders, "Content-Type": "application/json" },
       credentials: "include"
     });
 
     if (res.status === 401) {
-      if (typeof showToast === "function") showToast("Please sign in to generate telemetry", "error");
+      showSecurityToast("Please sign in to sync router traffic", "error");
       return;
     }
 
@@ -875,24 +875,22 @@ async function simulateTrafficFlows() {
     }
 
     const data = await res.json();
-    if (typeof showToast === "function") {
-      showToast(data.message || `Generated ${data.flows_generated} flow records.`, "success");
-    }
-
+    showSecurityToast(data.message || `Synchronized ${data.flows_harvested || 0} real subscriber traffic records.`, "success");
     await loadTrafficAnalytics(false);
   } catch (err) {
-    console.error("Failed to simulate flows:", err);
-    if (typeof showToast === "function") {
-      showToast("Flow generation failed: " + err.message, "error");
-    }
+    console.error("Failed to sync router traffic:", err);
+    showSecurityToast("Sync router traffic failed: " + err.message, "error");
   } finally {
     if (btn) {
       btn.disabled = false;
-      btn.innerHTML = `<i data-lucide="sparkles" class="w-3.5 h-3.5 text-emerald-400"></i> Simulate Flows`;
+      btn.innerHTML = `<i data-lucide="radio" class="w-3.5 h-3.5 text-cyan-400"></i> Sync Router Traffic`;
       if (window.lucide) lucide.createIcons();
     }
   }
 }
+
+// Backward-compatible alias
+const simulateTrafficFlows = syncRouterTraffic;
 
 // MIKROTIK FLOW SCRIPT MODAL
 async function openMikroTikFlowModal() {

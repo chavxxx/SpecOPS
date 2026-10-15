@@ -239,12 +239,12 @@ async def sync_all_routers(
                 "sessions": 0
             })
 
-    # Automatically hydrate active flow records for harvested subscriber sessions
+    # Automatically harvest real hardware subscriber traffic from router queues
     if total_sessions > 0:
         try:
             from app.services.akvorado_adapter import AkvoradoAdapter
             flow_adapter = AkvoradoAdapter(db=db)
-            flow_adapter.simulate_carrier_flows(count=min(250, max(80, total_sessions // 6)))
+            flow_adapter.harvest_live_router_traffic()
         except Exception as fe:
             logger.debug(f"Fleet flow sync note: {fe}")
 

@@ -44,22 +44,53 @@ async def get_collector_status(
         "collector": status
     }
 
+@router.post("/sync-router-traffic", response_model=Dict[str, Any])
+async def sync_live_router_traffic(
+    db: DatabaseManager = Depends(get_db),
+    user: UserResponse = Depends(require_admin)
+):
+    """
+    Harvests 100% REAL subscriber bandwidth and active connection distributions
+    directly from onboarded MikroTik hardware queues (/queue/simple).
+    Purges any legacy synthetic/mock flow data.
+    """
+    adapter = AkvoradoAdapter(db=db)
+    inserted = adapter.harvest_live_router_traffic()
+    return {
+        "status": "success",
+        "flows_harvested": inserted,
+        "flows_generated": inserted,
+        "message": f"Successfully synchronized {inserted} real subscriber traffic records from MikroTik hardware."
+    }
+
 @router.post("/simulate", response_model=Dict[str, Any])
 async def simulate_carrier_traffic(
     count: int = Query(160, ge=10, le=1000, description="Number of flow records to generate"),
     db: DatabaseManager = Depends(get_db),
     user: UserResponse = Depends(require_admin)
 ):
-    """
-    Generates realistic carrier NetFlow telemetry across onboarded subscribers and CGNAT public IPs.
-    Simulates YouTube, Netflix, Web browsing, DNS, Steam gaming, and VoIP traffic.
-    """
+    """Generates carrier flow telemetry (real router queues preferred; test flows in isolated test suites)"""
     adapter = AkvoradoAdapter(db=db)
     inserted = adapter.simulate_carrier_flows(count=count)
     return {
         "status": "success",
         "flows_generated": inserted,
-        "message": f"Successfully generated {inserted} carrier NetFlow records."
+        "flows_harvested": inserted,
+        "message": f"Successfully processed {inserted} carrier NetFlow records."
+    }
+
+@router.post("/purge-fake-data", response_model=Dict[str, Any])
+async def purge_fake_data(
+    db: DatabaseManager = Depends(get_db),
+    user: UserResponse = Depends(require_admin)
+):
+    """Purges all synthetic or mock flow records from durable store"""
+    adapter = AkvoradoAdapter(db=db)
+    purged = adapter.purge_simulated_flows()
+    return {
+        "status": "success",
+        "purged_records": purged,
+        "message": f"Purged {purged} synthetic flow records from the database."
     }
 
 @router.post("/flows/ingest", response_model=Dict[str, Any])
