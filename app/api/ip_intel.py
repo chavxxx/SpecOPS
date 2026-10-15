@@ -5,7 +5,8 @@ WISP Network & Data Solutions (WISPnet)
 import io
 import csv
 import json
-from typing import List, Optional, Dict, Any
+import ipaddress
+from typing import List, Optional, Dict, Any, Tuple
 from fastapi import APIRouter, HTTPException, Depends, Query, Response, UploadFile, File
 from fastapi.responses import StreamingResponse
 
@@ -196,33 +197,81 @@ async def list_ip_inventory(
     )
     return [PublicIPInventoryItem(**it) for it in items]
 
+def parse_target_ips(target: str) -> Tuple[List[str], Optional[str]]:
+    """Parses single IP, CIDR subnet, or hyphenated IP range into individual IPv4 host strings"""
+    target = target.strip()
+    # 1. Single IP
+    try:
+        ipaddress.IPv4Address(target)
+        return [target], None
+    except Exception:
+        pass
+
+    # 2. CIDR Prefix (e.g. 157.119.69.128/28)
+    if "/" in target:
+        try:
+            net = ipaddress.ip_network(target, strict=False)
+            hosts = [str(ip) for ip in net.hosts()]
+            return (hosts or [str(net.network_address)])[:512], target
+        except Exception:
+            pass
+
+    # 3. Hyphenated Range: e.g. 157.119.69.130 - 157.119.69.140
+    if "-" in target:
+        parts = [p.strip() for p in target.split("-", 1)]
+        try:
+            start = ipaddress.IPv4Address(parts[0])
+            end = ipaddress.IPv4Address(parts[1])
+            if int(start) <= int(end):
+                count = min(512, int(end) - int(start) + 1)
+                ips = [str(ipaddress.IPv4Address(int(start) + i)) for i in range(count)]
+                return ips, f"{parts[0]}-{parts[1]}"
+        except Exception:
+            pass
+
+    return [], None
+
 @router.post("/inventory", response_model=Dict[str, Any])
 async def add_inventory_ip(
     req: PublicIPInventoryCreate,
     db: DatabaseManager = Depends(get_db),
     user: UserResponse = Depends(require_admin)
 ):
-    ip = req.ip_address.strip()
-    if not is_valid_ip(ip):
-        raise HTTPException(status_code=400, detail="Invalid IP address format.")
+    raw_target = req.ip_address.strip()
+    ips, inferred_cidr = parse_target_ips(raw_target)
+    if not ips:
+        raise HTTPException(status_code=400, detail="Invalid IP address, CIDR subnet, or IP range format.")
 
-    item_id = db.upsert_ip_inventory_item(
-        ip_address=ip,
-        cidr_allocation=req.cidr_allocation,
-        inventory_identifier=req.inventory_identifier,
-        routing_context=req.routing_context,
-        purpose_role=req.purpose_role,
-        monitoring_status=req.monitoring_status.value,
-        notes=req.notes
-    )
+    cidr_val = req.cidr_allocation or inferred_cidr
+    added_ids = []
+    for ip in ips:
+        item_id = db.upsert_ip_inventory_item(
+            ip_address=ip,
+            cidr_allocation=cidr_val,
+            inventory_identifier=req.inventory_identifier,
+            routing_context=req.routing_context,
+            purpose_role=req.purpose_role,
+            monitoring_status=req.monitoring_status.value,
+            notes=req.notes
+        )
+        added_ids.append(item_id)
+
     db.log_ip_intel_audit(
         username=user.username,
         action="add_inventory_ip",
-        target_type="ip",
-        target_id=ip,
-        details={"role": req.purpose_role}
+        target_type="ip" if len(ips) == 1 else "range",
+        target_id=raw_target,
+        details={"role": req.purpose_role, "count": len(ips)}
     )
-    return {"success": True, "id": item_id, "ip_address": ip}
+
+    msg = f"Added {ips[0]} to inventory" if len(ips) == 1 else f"Successfully added {len(ips)} IP addresses from range to inventory"
+    return {
+        "success": True,
+        "count": len(ips),
+        "id": added_ids[0] if added_ids else None,
+        "ip_address": ips[0] if len(ips) == 1 else raw_target,
+        "message": msg
+    }
 
 @router.put("/inventory/{ip_address}")
 async def update_inventory_ip(

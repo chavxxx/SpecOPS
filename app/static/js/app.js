@@ -168,7 +168,18 @@ function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
-// Modal helper
+// Modal helpers
+function openModal(modalId) {
+  const m = document.getElementById(modalId);
+  if (m) {
+    m.classList.remove('hidden');
+    m.classList.add('flex');
+    if (window.lucide) lucide.createIcons();
+    const input = m.querySelector('input:not([type="hidden"]), select, textarea');
+    if (input) setTimeout(() => input.focus(), 60);
+  }
+}
+
 function closeModal(modalId) {
   const m = document.getElementById(modalId);
   if (m) {

@@ -550,14 +550,30 @@ function quickCheckIP(ip) {
   executeSingleLookup();
 }
 
+function openAddInventoryModal() {
+  const ipEl = document.getElementById("modal-inv-ip");
+  const cidrEl = document.getElementById("modal-inv-cidr");
+  const notesEl = document.getElementById("modal-inv-notes");
+  if (ipEl) ipEl.value = "";
+  if (cidrEl) cidrEl.value = "";
+  if (notesEl) notesEl.value = "";
+  openModal("modal-intel-add-inventory");
+}
+
 async function addInventorySubmit() {
-  const ip = document.getElementById("modal-inv-ip")?.value.trim();
-  const cidr = document.getElementById("modal-inv-cidr")?.value.trim();
-  const role = document.getElementById("modal-inv-role")?.value;
-  const notes = document.getElementById("modal-inv-notes")?.value;
+  const ipEl = document.getElementById("modal-inv-ip");
+  const cidrEl = document.getElementById("modal-inv-cidr");
+  const roleEl = document.getElementById("modal-inv-role");
+  const notesEl = document.getElementById("modal-inv-notes");
+
+  const ip = ipEl?.value.trim();
+  const cidr = cidrEl?.value.trim();
+  const role = roleEl?.value;
+  const notes = notesEl?.value;
 
   if (!ip) {
-    showIntelToast("IP Address is required", true);
+    showIntelToast("IP Address or Range is required", true);
+    if (ipEl) ipEl.focus();
     return;
   }
 
@@ -572,9 +588,13 @@ async function addInventorySubmit() {
         notes: notes || null
       })
     });
-    if (!res.ok) throw new Error("Failed to add IP to inventory");
-    showIntelToast(`Added ${ip} to inventory!`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || "Failed to add IP to inventory");
+    showIntelToast(data.message || `Added ${ip} to inventory!`, false);
     closeModal("modal-intel-add-inventory");
+    if (ipEl) ipEl.value = "";
+    if (cidrEl) cidrEl.value = "";
+    if (notesEl) notesEl.value = "";
     loadIPIntelInventory();
   } catch (e) {
     showIntelToast(e.message, true);

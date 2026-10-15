@@ -349,6 +349,42 @@ async def test_ip_intel_api_overview_and_check(admin_headers, analyst_headers):
         assert res_add.status_code == 200
         assert res_add.json()["success"] is True
 
+        # Test CIDR block addition
+        res_add_cidr = await client.post(
+            "/api/ip-intelligence/inventory",
+            headers=admin_headers,
+            json={
+                "ip_address": "157.119.69.240/29",
+                "purpose_role": "Core Infrastructure"
+            }
+        )
+        assert res_add_cidr.status_code == 200
+        data_cidr = res_add_cidr.json()
+        assert data_cidr["success"] is True
+        assert data_cidr["count"] == 6  # 6 usable host IPs in /29
+
+        # Test hyphenated IP range addition
+        res_add_range = await client.post(
+            "/api/ip-intelligence/inventory",
+            headers=admin_headers,
+            json={
+                "ip_address": "157.119.69.250-157.119.69.253",
+                "purpose_role": "Static Business"
+            }
+        )
+        assert res_add_range.status_code == 200
+        data_range = res_add_range.json()
+        assert data_range["success"] is True
+        assert data_range["count"] == 4
+
+        # Test invalid target rejected with 400
+        res_add_invalid = await client.post(
+            "/api/ip-intelligence/inventory",
+            headers=admin_headers,
+            json={"ip_address": "invalid-ip-or-range"}
+        )
+        assert res_add_invalid.status_code == 400
+
         # Analyst cannot add inventory (RBAC check)
         res_add_unauth = await client.post(
             "/api/ip-intelligence/inventory",
