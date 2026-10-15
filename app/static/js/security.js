@@ -589,72 +589,351 @@ async function saveIncidentStatusUpdate() {
 // ---------------------------------------------------------------------------
 // PAGE 6: TRAFFIC ANALYTICS (AKVORADO FLOWS)
 // ---------------------------------------------------------------------------
-async function loadTrafficAnalytics() {
+async function loadTrafficAnalytics(isManual = false) {
+  const spinIcon = document.getElementById("sec-traffic-refresh-icon");
+  if (spinIcon) spinIcon.classList.add("animate-spin");
+
   try {
     const authHeaders = typeof getAuthHeaders === "function" ? getAuthHeaders() : {};
-    const res = await fetch("/api/security/traffic/overview", { headers: authHeaders, credentials: "include" });
+    const winSelect = document.getElementById("sec-traffic-window-select");
+    const windowMinutes = winSelect ? parseInt(winSelect.value, 10) || 60 : 60;
+
+    const res = await fetch(`/api/security/traffic/overview?window_minutes=${windowMinutes}`, {
+      headers: authHeaders,
+      credentials: "include"
+    });
+
+    if (res.status === 401) {
+      if (typeof showToast === "function") showToast("Please sign in to view flow analytics", "error");
+      return;
+    }
+
     const data = res.ok ? await res.json() : { analytics: {} };
     const an = data.analytics || {};
+    const kpis = an.kpis || {};
     const topSubs = Array.isArray(an.top_subscribers) ? an.top_subscribers : [];
     const topPubs = Array.isArray(an.top_public_ips) ? an.top_public_ips : [];
     const protos = Array.isArray(an.protocols) ? an.protocols : [];
+    const ports = Array.isArray(an.top_destination_ports) ? an.top_destination_ports : [];
+    const obs = an.observation_points || {};
+    const collector = an.collector || {};
 
-    // Top subscribers
+    // 1. KPI Cards
+    const totalBytes = kpis.total_bytes || 0;
+    const bytesFormatted = totalBytes >= 1_000_000_000
+      ? (totalBytes / 1_000_000_000).toFixed(2) + " GB"
+      : (totalBytes / 1_000_000).toFixed(2) + " MB";
+
+    const kpiBytesEl = document.getElementById("sec-traffic-kpi-bytes");
+    const kpiMbpsEl = document.getElementById("sec-traffic-kpi-mbps");
+    const kpiFlowsEl = document.getElementById("sec-traffic-kpi-flows");
+    const kpiSubsEl = document.getElementById("sec-traffic-kpi-subs");
+
+    if (kpiBytesEl) kpiBytesEl.innerText = bytesFormatted;
+    if (kpiMbpsEl) kpiMbpsEl.innerText = `${kpis.avg_throughput_mbps || 0.00} Mbps`;
+    if (kpiFlowsEl) kpiFlowsEl.innerText = (kpis.total_flows || 0).toLocaleString();
+    if (kpiSubsEl) kpiSubsEl.innerText = kpis.active_subscribers_count || topSubs.length;
+
+    // 2. Collector Status
+    const collectorModeEl = document.getElementById("sec-traffic-collector-mode");
+    if (collectorModeEl) {
+      collectorModeEl.innerText = collector.status === "online" ? "Akvorado Live" : "NetFlow Engine Active";
+    }
+
+    // 3. Top Subscribers Table
     const subTbody = document.getElementById("sec-traffic-top-sub-tbody");
     if (subTbody) {
       if (topSubs.length === 0) {
-        subTbody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-slate-400">No subscriber traffic data collected yet</td></tr>`;
-      } else {
-        subTbody.innerHTML = topSubs.map((s, idx) => `
-          <tr class="border-b border-slate-800 text-xs">
-            <td class="py-2 px-3 font-mono font-bold text-slate-500">#${idx + 1}</td>
-            <td class="py-2 px-3 font-mono text-brand-300 font-semibold cursor-pointer hover:underline" onclick="openSubscriberProfile('${s.subscriber_cgnat_ip}')">${s.subscriber_cgnat_ip}</td>
-            <td class="py-2 px-3 font-mono text-slate-300">${((s.total_bytes || 0) / 1000000).toFixed(2)} MB</td>
-            <td class="py-2 px-3 font-mono text-slate-400">${(s.total_packets || 0).toLocaleString()}</td>
-            <td class="py-2 px-3 font-mono text-emerald-400 font-bold">${s.mbps_rate || 0} Mbps</td>
+        subTbody.innerHTML = `
+          <tr>
+            <td colspan="5" class="text-center py-8 text-slate-400">
+              <div class="flex flex-col items-center justify-center gap-2">
+                <i data-lucide="activity" class="w-7 h-7 text-slate-600"></i>
+                <span class="text-xs font-semibold">No subscriber NetFlow records in this time window</span>
+                <p class="text-[11px] text-slate-500 max-w-sm text-center">Export IPFIX from your MikroTik routers or simulate flow telemetry to view active distributions.</p>
+                <div class="flex gap-2 mt-2">
+                  <button onclick="simulateTrafficFlows()" class="px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-xs font-semibold flex items-center gap-1.5">
+                    <i data-lucide="sparkles" class="w-3 h-3"></i> Simulate Carrier Flows
+                  </button>
+                  <button onclick="openMikroTikFlowModal()" class="px-3 py-1.5 rounded-lg bg-dark-800 hover:bg-dark-750 text-slate-300 border border-slate-700 text-xs font-semibold flex items-center gap-1.5">
+                    <i data-lucide="terminal" class="w-3 h-3 text-cyan-400"></i> MikroTik Guide
+                  </button>
+                </div>
+              </div>
+            </td>
           </tr>
-        `).join("");
+        `;
+      } else {
+        subTbody.innerHTML = topSubs.map((s, idx) => {
+          const volFormatted = (s.total_bytes || 0) >= 1_000_000_000
+            ? ((s.total_bytes || 0) / 1_000_000_000).toFixed(2) + " GB"
+            : ((s.total_bytes || 0) / 1_000_000).toFixed(2) + " MB";
+
+          return `
+            <tr class="hover:bg-dark-800/60 border-b border-slate-800/80 text-xs transition-colors">
+              <td class="py-2.5 px-3 font-mono font-bold text-slate-500">#${idx + 1}</td>
+              <td class="py-2.5 px-3 font-mono text-xs">
+                <div class="flex items-center gap-1.5">
+                  <span class="text-brand-300 font-semibold cursor-pointer hover:underline" onclick="openSubscriberProfile('${s.subscriber_cgnat_ip}')">${s.subscriber_cgnat_ip}</span>
+                  <button onclick="copyToClipboard('${s.subscriber_cgnat_ip}', 'CGNAT IP')" class="text-slate-500 hover:text-white p-0.5" title="Copy IP"><i data-lucide="copy" class="w-3 h-3 inline"></i></button>
+                </div>
+                <div class="text-[10px] text-slate-400 font-sans">${s.pppoe_username || '—'}</div>
+              </td>
+              <td class="py-2.5 px-3 font-mono text-slate-200 font-semibold">${volFormatted}</td>
+              <td class="py-2.5 px-3 font-mono text-slate-400">${(s.total_packets || 0).toLocaleString()}</td>
+              <td class="py-2.5 px-3 font-mono">
+                <span class="text-emerald-400 font-bold">${s.mbps_rate || 0.00} Mbps</span>
+                <div class="w-16 bg-dark-900 h-1 rounded-full mt-1 overflow-hidden">
+                  <div class="bg-emerald-500 h-full rounded-full" style="width: ${Math.min(100, (s.percentage || 0))}%"></div>
+                </div>
+              </td>
+            </tr>
+          `;
+        }).join("");
       }
     }
 
-    // Top public IPs
+    // 4. Top Public CGNAT IPs Table
     const pubTbody = document.getElementById("sec-traffic-top-pub-tbody");
     if (pubTbody) {
       if (topPubs.length === 0) {
-        pubTbody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-slate-400">No public IP traffic collected yet</td></tr>`;
-      } else {
-        pubTbody.innerHTML = topPubs.map((p, idx) => `
-          <tr class="border-b border-slate-800 text-xs">
-            <td class="py-2 px-3 font-mono font-bold text-slate-500">#${idx + 1}</td>
-            <td class="py-2 px-3 font-mono text-cyan-300 font-semibold">${p.public_ip}</td>
-            <td class="py-2 px-3 font-mono text-slate-300">${((p.total_bytes || 0) / 1000000).toFixed(2)} MB</td>
-            <td class="py-2 px-3 font-mono text-slate-400">${p.event_count || 0}</td>
+        pubTbody.innerHTML = `
+          <tr>
+            <td colspan="5" class="text-center py-8 text-slate-400">
+              <div class="flex flex-col items-center justify-center gap-1.5">
+                <i data-lucide="globe" class="w-6 h-6 text-slate-600"></i>
+                <span class="text-xs">No public CGNAT pool egress traffic recorded</span>
+              </div>
+            </td>
           </tr>
-        `).join("");
+        `;
+      } else {
+        pubTbody.innerHTML = topPubs.map((p, idx) => {
+          const volFormatted = (p.total_bytes || 0) >= 1_000_000_000
+            ? ((p.total_bytes || 0) / 1_000_000_000).toFixed(2) + " GB"
+            : ((p.total_bytes || 0) / 1_000_000).toFixed(2) + " MB";
+
+          const poolBadge = p.is_cgnat_pool
+            ? `<span class="ml-1 px-1.5 py-0.2 rounded text-[9px] font-bold uppercase bg-cyan-600/20 text-cyan-300 border border-cyan-500/30">Pool IP</span>`
+            : '';
+
+          return `
+            <tr class="hover:bg-dark-800/60 border-b border-slate-800/80 text-xs transition-colors">
+              <td class="py-2.5 px-3 font-mono font-bold text-slate-500">#${idx + 1}</td>
+              <td class="py-2.5 px-3 font-mono text-cyan-300 font-semibold">
+                <div class="flex items-center gap-1.5">
+                  <span>${p.public_ip}</span>
+                  <button onclick="copyToClipboard('${p.public_ip}', 'Public IP')" class="text-slate-500 hover:text-white p-0.5" title="Copy IP"><i data-lucide="copy" class="w-3 h-3 inline"></i></button>
+                  ${poolBadge}
+                </div>
+              </td>
+              <td class="py-2.5 px-3 font-mono text-slate-200 font-semibold">${volFormatted}</td>
+              <td class="py-2.5 px-3 font-mono text-slate-400">${(p.event_count || 0).toLocaleString()}</td>
+              <td class="py-2.5 px-3 font-mono text-slate-300">
+                <span>${p.percentage || 0}%</span>
+                <div class="w-16 bg-dark-900 h-1 rounded-full mt-1 overflow-hidden">
+                  <div class="bg-cyan-500 h-full rounded-full" style="width: ${Math.min(100, (p.percentage || 0))}%"></div>
+                </div>
+              </td>
+            </tr>
+          `;
+        }).join("");
       }
     }
 
-    // Protocol breakdown
+    // 5. Protocol Breakdown
     const protoContainer = document.getElementById("sec-traffic-protocols");
     if (protoContainer) {
-      const totalBytes = protos.reduce((sum, p) => sum + (p.bytes || 0), 0) || 1;
-      protoContainer.innerHTML = protos.map(p => {
-        const pct = (((p.bytes || 0) / totalBytes) * 100).toFixed(1);
-        return `
-          <div class="space-y-1">
-            <div class="flex justify-between text-xs font-mono">
-              <span class="text-white font-bold">${p.protocol}</span>
-              <span class="text-slate-400">${((p.bytes || 0) / 1000000).toFixed(2)} MB (${pct}%)</span>
+      if (protos.length === 0) {
+        protoContainer.innerHTML = `<p class="text-xs text-slate-400 py-4 text-center">No protocol distributions recorded in this window</p>`;
+      } else {
+        const protoColors = {
+          TCP: "bg-blue-500",
+          UDP: "bg-emerald-500",
+          ICMP: "bg-amber-500",
+          GRE: "bg-purple-500",
+          ESP: "bg-indigo-500"
+        };
+
+        protoContainer.innerHTML = protos.map(p => {
+          const protoName = p.protocol || "OTHER";
+          const colorClass = protoColors[protoName.toUpperCase()] || "bg-brand-500";
+          const volFormatted = (p.bytes || 0) >= 1_000_000_000
+            ? ((p.bytes || 0) / 1_000_000_000).toFixed(2) + " GB"
+            : ((p.bytes || 0) / 1_000_000).toFixed(2) + " MB";
+
+          return `
+            <div class="space-y-1">
+              <div class="flex justify-between text-xs font-mono">
+                <span class="text-white font-bold flex items-center gap-1.5">
+                  <span class="w-2 h-2 rounded-full ${colorClass}"></span>
+                  ${protoName}
+                </span>
+                <span class="text-slate-400">${volFormatted} (${p.percentage || 0}%) · ${(p.count || 0).toLocaleString()} flows</span>
+              </div>
+              <div class="w-full bg-dark-900 h-2 rounded-full overflow-hidden border border-slate-800">
+                <div class="${colorClass} h-full rounded-full transition-all duration-500" style="width: ${Math.min(100, p.percentage || 0)}%"></div>
+              </div>
             </div>
-            <div class="w-full bg-dark-800 h-2 rounded-full overflow-hidden">
-              <div class="bg-brand-500 h-full rounded-full" style="width: ${pct}%"></div>
+          `;
+        }).join("");
+      }
+    }
+
+    // 6. Top Destination Ports & Services
+    const portsContainer = document.getElementById("sec-traffic-ports");
+    if (portsContainer) {
+      if (ports.length === 0) {
+        portsContainer.innerHTML = `<p class="text-xs text-slate-400 py-4 text-center">No destination port classifications available</p>`;
+      } else {
+        portsContainer.innerHTML = ports.map(pt => {
+          const volFormatted = (pt.bytes || 0) >= 1_000_000_000
+            ? ((pt.bytes || 0) / 1_000_000_000).toFixed(2) + " GB"
+            : ((pt.bytes || 0) / 1_000_000).toFixed(2) + " MB";
+
+          return `
+            <div class="flex items-center justify-between p-2 rounded-xl bg-dark-900/70 border border-slate-800/80 text-xs hover:border-slate-700 transition-colors">
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono text-[10px] font-bold">:${pt.port}</span>
+                <span class="text-slate-200 font-semibold text-[11px]">${pt.service}</span>
+              </div>
+              <div class="text-right font-mono">
+                <div class="text-slate-300 font-bold text-[11px]">${volFormatted}</div>
+                <div class="text-[10px] text-slate-500">${(pt.hits || 0).toLocaleString()} flows (${pt.percentage || 0}%)</div>
+              </div>
             </div>
-          </div>
-        `;
-      }).join("");
+          `;
+        }).join("");
+      }
+    }
+
+    // 7. Observation Points Balance
+    const obsDetailEl = document.getElementById("sec-traffic-obs-detail");
+    if (obsDetailEl) {
+      const pre = obs.pre_cgnat || {};
+      const post = obs.post_cgnat || {};
+      const preMB = ((pre.bytes || 0) / 1_000_000).toFixed(1);
+      const postMB = ((post.bytes || 0) / 1_000_000).toFixed(1);
+      obsDetailEl.innerHTML = `Pre-CGNAT Switch Mirror: <strong>${preMB} MB</strong> (${pre.count || 0} flows) | Post-CGNAT Border TAP: <strong>${postMB} MB</strong> (${post.count || 0} flows)`;
+    }
+
+    const genAtEl = document.getElementById("sec-traffic-generated-at");
+    if (genAtEl) {
+      genAtEl.innerText = `Updated: ${formatManilaTime(an.generated_at || new Date().toISOString())}`;
+    }
+
+    if (window.lucide) lucide.createIcons();
+
+    if (isManual && typeof showToast === "function") {
+      showToast("Traffic flow analytics refreshed", "success");
     }
   } catch (e) {
     console.error("Error loading traffic analytics:", e);
+    if (isManual && typeof showToast === "function") {
+      showToast("Failed to refresh traffic analytics: " + e.message, "error");
+    }
+  } finally {
+    if (spinIcon) spinIcon.classList.remove("animate-spin");
+  }
+}
+
+// SIMULATE CARRIER FLOWS TRIGGER
+async function simulateTrafficFlows() {
+  const btn = document.getElementById("btn-sec-traffic-simulate");
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<i data-lucide="refresh-cw" class="w-3.5 h-3.5 animate-spin"></i> Generating Flows...`;
+    if (window.lucide) lucide.createIcons();
+  }
+
+  try {
+    const authHeaders = typeof getAuthHeaders === "function" ? getAuthHeaders() : {};
+    const res = await fetch("/api/security/traffic/simulate?count=160", {
+      method: "POST",
+      headers: { ...authHeaders, "Content-Type": "application/json" },
+      credentials: "include"
+    });
+
+    if (res.status === 401) {
+      if (typeof showToast === "function") showToast("Please sign in to generate telemetry", "error");
+      return;
+    }
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
+    if (typeof showToast === "function") {
+      showToast(data.message || `Generated ${data.flows_generated} flow records.`, "success");
+    }
+
+    await loadTrafficAnalytics(false);
+  } catch (err) {
+    console.error("Failed to simulate flows:", err);
+    if (typeof showToast === "function") {
+      showToast("Flow generation failed: " + err.message, "error");
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `<i data-lucide="sparkles" class="w-3.5 h-3.5 text-emerald-400"></i> Simulate Flows`;
+      if (window.lucide) lucide.createIcons();
+    }
+  }
+}
+
+// MIKROTIK FLOW SCRIPT MODAL
+async function openMikroTikFlowModal() {
+  const modal = document.getElementById("modal-mikrotik-flow");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  await updateMikroTikFlowSnippet();
+  if (window.lucide) lucide.createIcons();
+}
+
+function closeMikroTikFlowModal() {
+  const modal = document.getElementById("modal-mikrotik-flow");
+  if (modal) modal.classList.add("hidden");
+}
+
+async function updateMikroTikFlowSnippet() {
+  const ipInput = document.getElementById("flow-modal-collector-ip");
+  const portInput = document.getElementById("flow-modal-port");
+  const preEl = document.getElementById("flow-modal-script-pre");
+
+  const collectorIp = (ipInput && ipInput.value.trim()) || "10.0.0.50";
+  const port = (portInput && portInput.value.trim()) || "2055";
+
+  if (preEl) {
+    preEl.innerText = `# ===============================================================
+# WISPnet & Akvorado NetFlow v9 / IPFIX Flow Export Configuration
+# Execute directly in MikroTik RouterOS v7 Terminal (WinBox / SSH)
+# ===============================================================
+
+# 1. Enable Traffic-Flow Collector Engine
+/ip traffic-flow set enabled=yes active-flow-timeout=1m inactive-flow-timeout=15s cache-entries=128k
+
+# 2. Add Akvorado / WISPnet Flow Collector Target
+/ip traffic-flow target add name="akvorado-collector" dst-address=${collectorIp} port=${port} version=ipfix
+
+# 3. Enable Flow Sampling on WAN and Subscriber Interfaces
+/ip traffic-flow set interfaces=all
+
+# 4. Verify Traffic-Flow Status
+/ip traffic-flow print
+/ip traffic-flow target print`;
+  }
+}
+
+function copyMikroTikFlowSnippet() {
+  const preEl = document.getElementById("flow-modal-script-pre");
+  if (preEl && typeof copyToClipboard === "function") {
+    copyToClipboard(preEl.innerText, "MikroTik Flow Script");
+  } else if (preEl) {
+    navigator.clipboard.writeText(preEl.innerText);
+    if (typeof showToast === "function") showToast("Copied script to clipboard", "success");
   }
 }
 

@@ -287,6 +287,31 @@ class SecurityDatabaseMixin:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_routers_role ON routers (role);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_routers_status ON routers (status);")
 
+        # 14. NetFlow / IPFIX Flow Records (Akvorado Flow Analytics)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS flow_records (
+                flow_id TEXT PRIMARY KEY,
+                timestamp TIMESTAMP NOT NULL,
+                sensor_id TEXT DEFAULT 'sensor-flow-akvorado',
+                observation_point TEXT DEFAULT 'post_cgnat',
+                source_ip TEXT NOT NULL,
+                source_port INTEGER,
+                destination_ip TEXT NOT NULL,
+                destination_port INTEGER,
+                protocol TEXT DEFAULT 'tcp',
+                packets INTEGER DEFAULT 1,
+                bytes INTEGER DEFAULT 0,
+                subscriber_cgnat_ip TEXT,
+                pppoe_username TEXT,
+                router_id TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_flow_records_time ON flow_records (timestamp DESC);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_flow_records_sub_ip ON flow_records (subscriber_cgnat_ip);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_flow_records_src_ip ON flow_records (source_ip);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_flow_records_proto ON flow_records (protocol);")
+
         # Seed default sensors & default detection rules if not existing
         self._seed_default_security_entities(cursor)
 
@@ -1565,4 +1590,50 @@ class SecurityDatabaseMixin:
             """, (status, model, ros_version, cpu_load, uptime, now if status == 'online' else None, last_error, now, router_id))
             conn.commit()
             return cursor.rowcount > 0
+
+    # -------------------------------------------------------------
+    # FLOW RECORDS & TRAFFIC ANALYTICS METHODS
+    # -------------------------------------------------------------
+    def insert_flow_records_batch(self, flows: List[Dict[str, Any]]) -> int:
+        if not flows:
+            return 0
+        now = get_utc_now_iso()
+        records = [
+            (
+                f.get("flow_id") or str(uuid.uuid4()),
+                f.get("timestamp") or now,
+                f.get("sensor_id") or "sensor-flow-akvorado",
+                f.get("observation_point") or "post_cgnat",
+                f.get("source_ip", ""),
+                f.get("source_port"),
+                f.get("destination_ip", ""),
+                f.get("destination_port"),
+                (f.get("protocol") or "tcp").lower(),
+                int(f.get("packets") or 1),
+                int(f.get("bytes") or 0),
+                f.get("subscriber_cgnat_ip"),
+                f.get("pppoe_username"),
+                f.get("router_id")
+            )
+            for f in flows
+        ]
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.executemany("""
+                INSERT OR REPLACE INTO flow_records (
+                    flow_id, timestamp, sensor_id, observation_point,
+                    source_ip, source_port, destination_ip, destination_port,
+                    protocol, packets, bytes, subscriber_cgnat_ip, pppoe_username, router_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, records)
+            conn.commit()
+            return cursor.rowcount
+
+    def clear_flow_records(self) -> int:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM flow_records;")
+            conn.commit()
+            return cursor.rowcount
+
 

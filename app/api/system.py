@@ -91,6 +91,7 @@ async def clear_sample_data(
         cursor.execute("DELETE FROM opensearch_queue;")
         cursor.execute("DELETE FROM raw_events;")
         cursor.execute("DELETE FROM notification_logs;")
+        cursor.execute("DELETE FROM flow_records;")
         conn.commit()
 
     db.log_audit_event(

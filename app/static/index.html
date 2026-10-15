@@ -644,31 +644,110 @@
     <!-- TAB: TRAFFIC ANALYTICS (AKVORADO FLOWS) -->
     <!-- ========================================================= -->
     <section id="tab-sec-traffic" class="tab-content hidden space-y-6">
-      <div class="pb-4 border-b border-slate-800">
-        <h2 class="text-xl font-bold text-white flex items-center gap-2">
-          <i data-lucide="bar-chart-3" class="w-6 h-6 text-emerald-400"></i>
-          Akvorado Flow Analytics & Traffic Distributions
-        </h2>
-        <p class="text-xs text-slate-400 mt-1">Top talkers before and after CGNAT, protocol breakdowns, and network traffic anomalies</p>
+      <!-- Header with Action Controls -->
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+        <div>
+          <h2 class="text-xl font-bold text-white flex items-center gap-2">
+            <i data-lucide="bar-chart-3" class="w-6 h-6 text-emerald-400"></i>
+            Akvorado Flow Analytics & Traffic Distributions
+          </h2>
+          <p class="text-xs text-slate-400 mt-1">Carrier NetFlow v9 & IPFIX distributions, top talkers pre/post-CGNAT, application ports, and network KPIs</p>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <!-- Collector Mode Badge -->
+          <div id="sec-traffic-collector-pill" class="px-2.5 py-1.5 rounded-xl bg-dark-800 border border-slate-700/80 text-xs font-mono flex items-center gap-2 text-slate-300">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span id="sec-traffic-collector-mode">NetFlow Engine Active</span>
+          </div>
+
+          <!-- Time Window Dropdown -->
+          <div class="flex items-center gap-1.5 bg-dark-800 border border-slate-700/80 rounded-xl px-2.5 py-1 text-xs">
+            <i data-lucide="clock" class="w-3.5 h-3.5 text-slate-400"></i>
+            <select id="sec-traffic-window-select" onchange="loadTrafficAnalytics(true)" class="bg-transparent text-slate-200 border-none outline-none font-semibold cursor-pointer">
+              <option value="15" class="bg-dark-900 text-white">Last 15 Minutes</option>
+              <option value="60" selected class="bg-dark-900 text-white">Last 1 Hour (Default)</option>
+              <option value="360" class="bg-dark-900 text-white">Last 6 Hours</option>
+              <option value="1440" class="bg-dark-900 text-white">Last 24 Hours</option>
+              <option value="10080" class="bg-dark-900 text-white">Last 7 Days</option>
+            </select>
+          </div>
+
+          <!-- Simulate Flows Button -->
+          <button id="btn-sec-traffic-simulate" onclick="simulateTrafficFlows()" title="Generate realistic carrier flows for testing" class="px-3 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 text-xs font-semibold flex items-center gap-1.5 shadow transition-all active:scale-95">
+            <i data-lucide="sparkles" class="w-3.5 h-3.5 text-emerald-400"></i> Simulate Flows
+          </button>
+
+          <!-- MikroTik Flow Script Modal Button -->
+          <button onclick="openMikroTikFlowModal()" title="View MikroTik RouterOS /ip traffic-flow configuration script" class="px-3 py-1.5 rounded-xl bg-dark-800 hover:bg-dark-750 border border-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 shadow transition-all active:scale-95">
+            <i data-lucide="terminal" class="w-3.5 h-3.5 text-cyan-400"></i> MikroTik Setup
+          </button>
+
+          <!-- Refresh Button -->
+          <button onclick="loadTrafficAnalytics(true)" title="Refresh NetFlow Telemetry" class="px-3 py-1.5 rounded-xl bg-dark-800 hover:bg-dark-750 border border-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 shadow transition-all active:scale-95">
+            <i data-lucide="refresh-cw" id="sec-traffic-refresh-icon" class="w-3.5 h-3.5 text-slate-300"></i> Refresh
+          </button>
+        </div>
       </div>
 
+      <!-- Network KPI Summary Cards -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="p-4 rounded-2xl bg-dark-850 border border-slate-800 shadow-xl">
+          <div class="flex items-center justify-between text-slate-400 text-xs font-semibold mb-1">
+            <span>Total Bandwidth</span>
+            <i data-lucide="arrow-down-up" class="w-4 h-4 text-emerald-400"></i>
+          </div>
+          <div id="sec-traffic-kpi-bytes" class="text-xl font-bold font-mono text-white">0.00 MB</div>
+          <div class="text-[11px] text-slate-500 mt-1">Within selected time window</div>
+        </div>
+
+        <div class="p-4 rounded-2xl bg-dark-850 border border-slate-800 shadow-xl">
+          <div class="flex items-center justify-between text-slate-400 text-xs font-semibold mb-1">
+            <span>Avg Throughput Rate</span>
+            <i data-lucide="zap" class="w-4 h-4 text-cyan-400"></i>
+          </div>
+          <div id="sec-traffic-kpi-mbps" class="text-xl font-bold font-mono text-cyan-300">0.00 Mbps</div>
+          <div class="text-[11px] text-slate-500 mt-1">Aggregate carrier rate</div>
+        </div>
+
+        <div class="p-4 rounded-2xl bg-dark-850 border border-slate-800 shadow-xl">
+          <div class="flex items-center justify-between text-slate-400 text-xs font-semibold mb-1">
+            <span>Flow Records Tracked</span>
+            <i data-lucide="layers" class="w-4 h-4 text-purple-400"></i>
+          </div>
+          <div id="sec-traffic-kpi-flows" class="text-xl font-bold font-mono text-purple-300">0</div>
+          <div class="text-[11px] text-slate-500 mt-1">IPFIX / NetFlow records</div>
+        </div>
+
+        <div class="p-4 rounded-2xl bg-dark-850 border border-slate-800 shadow-xl">
+          <div class="flex items-center justify-between text-slate-400 text-xs font-semibold mb-1">
+            <span>Active Subscribers</span>
+            <i data-lucide="users" class="w-4 h-4 text-brand-400"></i>
+          </div>
+          <div id="sec-traffic-kpi-subs" class="text-xl font-bold font-mono text-brand-300">0</div>
+          <div class="text-[11px] text-slate-500 mt-1">Pre-CGNAT endpoints</div>
+        </div>
+      </div>
+
+      <!-- Top Talkers Grid -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Top Subscribers Pre-NAT -->
         <div class="rounded-2xl bg-dark-850 border border-slate-800 overflow-hidden shadow-xl">
-          <div class="p-4 border-b border-slate-800">
+          <div class="p-4 border-b border-slate-800 flex items-center justify-between">
             <h3 class="text-sm font-bold text-white flex items-center gap-2">
               <i data-lucide="users" class="w-4 h-4 text-brand-400"></i> Top Subscriber CGNAT IPs (Pre-NAT Bandwidth)
             </h3>
+            <span class="text-[11px] text-slate-400 font-mono">Ranked by Total Volume</span>
           </div>
           <div class="overflow-x-auto">
             <table class="w-full text-left">
               <thead class="bg-dark-900 border-b border-slate-800 text-[11px] font-semibold text-slate-400 uppercase">
                 <tr>
                   <th class="py-2.5 px-3">Rank</th>
-                  <th class="py-2.5 px-3">CGNAT IP</th>
+                  <th class="py-2.5 px-3">Subscriber IP / User</th>
                   <th class="py-2.5 px-3">Volume</th>
                   <th class="py-2.5 px-3">Packets</th>
-                  <th class="py-2.5 px-3">Rate</th>
+                  <th class="py-2.5 px-3">Rate (Mbps)</th>
                 </tr>
               </thead>
               <tbody id="sec-traffic-top-sub-tbody" class="divide-y divide-slate-800/60 font-mono text-xs">
@@ -680,10 +759,11 @@
 
         <!-- Top Public IPs Post-NAT -->
         <div class="rounded-2xl bg-dark-850 border border-slate-800 overflow-hidden shadow-xl">
-          <div class="p-4 border-b border-slate-800">
+          <div class="p-4 border-b border-slate-800 flex items-center justify-between">
             <h3 class="text-sm font-bold text-white flex items-center gap-2">
               <i data-lucide="globe" class="w-4 h-4 text-cyan-400"></i> Top Public CGNAT IPs (Post-NAT Volume)
             </h3>
+            <span class="text-[11px] text-slate-400 font-mono">NAT Pool Egress</span>
           </div>
           <div class="overflow-x-auto">
             <table class="w-full text-left">
@@ -692,24 +772,56 @@
                   <th class="py-2.5 px-3">Rank</th>
                   <th class="py-2.5 px-3">Public IP</th>
                   <th class="py-2.5 px-3">Volume</th>
-                  <th class="py-2.5 px-3">Events</th>
+                  <th class="py-2.5 px-3">Flows / Events</th>
+                  <th class="py-2.5 px-3">Pool Share</th>
                 </tr>
               </thead>
               <tbody id="sec-traffic-top-pub-tbody" class="divide-y divide-slate-800/60 font-mono text-xs">
-                <tr><td colspan="4" class="text-center py-6 text-slate-500">Loading public IP flows...</td></tr>
+                <tr><td colspan="5" class="text-center py-6 text-slate-500">Loading public IP flows...</td></tr>
               </tbody>
             </table>
           </div>
         </div>
       </div>
 
-      <!-- Protocol Distribution Card -->
-      <div class="p-5 rounded-2xl bg-dark-850 border border-slate-800 space-y-4">
-        <h3 class="text-sm font-bold text-white flex items-center gap-2">
-          <i data-lucide="pie-chart" class="w-4 h-4 text-purple-400"></i> Protocol Distribution Breakdown
-        </h3>
-        <div id="sec-traffic-protocols" class="space-y-3">
-          <p class="text-xs text-slate-500">Loading protocol stats...</p>
+      <!-- Protocols and Top Destination Services Grid -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Protocol Distribution Card -->
+        <div class="p-5 rounded-2xl bg-dark-850 border border-slate-800 space-y-4 shadow-xl">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+            <h3 class="text-sm font-bold text-white flex items-center gap-2">
+              <i data-lucide="pie-chart" class="w-4 h-4 text-purple-400"></i> Protocol Distribution Breakdown
+            </h3>
+            <span class="text-[11px] text-slate-400 font-mono">TCP / UDP / ICMP</span>
+          </div>
+          <div id="sec-traffic-protocols" class="space-y-3">
+            <p class="text-xs text-slate-500">Loading protocol stats...</p>
+          </div>
+        </div>
+
+        <!-- Top Destination Ports & Services -->
+        <div class="p-5 rounded-2xl bg-dark-850 border border-slate-800 space-y-4 shadow-xl">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+            <h3 class="text-sm font-bold text-white flex items-center gap-2">
+              <i data-lucide="server" class="w-4 h-4 text-amber-400"></i> Top Destination Ports & Application Services
+            </h3>
+            <span class="text-[11px] text-slate-400 font-mono">Application Classification</span>
+          </div>
+          <div id="sec-traffic-ports" class="space-y-2.5 max-h-72 overflow-y-auto pr-1">
+            <p class="text-xs text-slate-500">Loading application port stats...</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Observation Point Balance -->
+      <div id="sec-traffic-obs-balance" class="p-4 rounded-2xl bg-dark-850 border border-slate-800 text-xs font-mono flex flex-col sm:flex-row items-center justify-between gap-3 text-slate-300">
+        <div class="flex items-center gap-2">
+          <i data-lucide="git-commit" class="w-4 h-4 text-cyan-400"></i>
+          <span>Observation Points:</span>
+          <span id="sec-traffic-obs-detail">Pre-CGNAT Switch Mirror vs Post-CGNAT Border TAP</span>
+        </div>
+        <div class="text-slate-400 text-[11px]" id="sec-traffic-generated-at">
+          Last updated: —
         </div>
       </div>
     </section>
@@ -1882,11 +1994,62 @@
     </div>
   </div>
 
+  <!-- MODAL: MIKROTIK NETFLOW / IPFIX FLOW EXPORT SETUP -->
+  <div id="modal-mikrotik-flow" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+    <div class="w-full max-w-2xl p-6 rounded-2xl bg-dark-850 border border-slate-700 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+        <div>
+          <h3 class="text-base font-bold text-white flex items-center gap-2">
+            <i data-lucide="terminal" class="w-5 h-5 text-cyan-400"></i> MikroTik NetFlow / IPFIX Export Setup
+          </h3>
+          <p class="text-xs text-slate-400 mt-0.5">Configure RouterOS v7 <span class="font-mono text-cyan-300">/ip traffic-flow</span> to stream flow telemetry to WISPnet / Akvorado</p>
+        </div>
+        <button onclick="closeMikroTikFlowModal()" class="text-slate-400 hover:text-white transition-colors">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="space-y-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+          <div>
+            <label class="block text-slate-400 font-semibold mb-1">Collector Server IP</label>
+            <input type="text" id="flow-modal-collector-ip" value="10.0.0.50" oninput="updateMikroTikFlowSnippet()" class="w-full px-3 py-1.5 rounded-lg bg-dark-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-cyan-500">
+          </div>
+          <div>
+            <label class="block text-slate-400 font-semibold mb-1">NetFlow / IPFIX UDP Port</label>
+            <input type="number" id="flow-modal-port" value="2055" oninput="updateMikroTikFlowSnippet()" class="w-full px-3 py-1.5 rounded-lg bg-dark-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-cyan-500">
+          </div>
+        </div>
+
+        <div class="relative">
+          <div class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1 flex items-center justify-between">
+            <span>RouterOS v7 CLI Commands</span>
+            <button onclick="copyMikroTikFlowSnippet()" class="text-cyan-400 hover:text-cyan-300 flex items-center gap-1 text-xs">
+              <i data-lucide="copy" class="w-3.5 h-3.5"></i> Copy Commands
+            </button>
+          </div>
+          <pre id="flow-modal-script-pre" class="p-4 rounded-xl bg-dark-900 border border-slate-800 text-cyan-300 font-mono text-xs overflow-x-auto select-all leading-relaxed"></pre>
+        </div>
+
+        <div class="p-3 rounded-xl bg-dark-900/60 border border-slate-800 text-xs text-slate-400 space-y-1">
+          <div class="text-slate-200 font-semibold flex items-center gap-1.5">
+            <i data-lucide="info" class="w-3.5 h-3.5 text-brand-400"></i> Deployment Verification
+          </div>
+          <p>Paste the snippet into your RouterOS Terminal (via WinBox or SSH). Run <code class="text-cyan-300">/ip traffic-flow target print</code> to verify packet counts increasing.</p>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end pt-3 border-t border-slate-800">
+        <button onclick="closeMikroTikFlowModal()" class="px-5 py-2 rounded-xl bg-dark-800 hover:bg-dark-700 border border-slate-700 text-slate-200 text-xs font-semibold">Done</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast-container" class="fixed bottom-5 right-5 z-50 space-y-2"></div>
 
   <!-- APPLICATION SCRIPTS -->
-  <script src="/static/js/app.js?v=2.1.0"></script>
-  <script src="/static/js/security.js?v=2.1.0"></script>
-  <script src="/static/js/ip_intel.js?v=2.1.0"></script>
+  <script src="/static/js/app.js?v=2.2.0"></script>
+  <script src="/static/js/security.js?v=2.2.0"></script>
+  <script src="/static/js/ip_intel.js?v=2.2.0"></script>
 </body>
 </html>
