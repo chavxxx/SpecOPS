@@ -420,6 +420,9 @@ class IPIntelDatabaseMixin:
         self,
         monitoring_status: Optional[str] = None,
         reputation_status: Optional[str] = None,
+        purpose_role: Optional[str] = None,
+        search: Optional[str] = None,
+        sort_by: str = "recent",
         limit: int = 100,
         offset: int = 0
     ) -> List[Dict[str, Any]]:
@@ -431,7 +434,26 @@ class IPIntelDatabaseMixin:
         if reputation_status:
             query += " AND current_reputation_status = ?"
             params.append(reputation_status)
-        query += " ORDER BY ip_address ASC LIMIT ? OFFSET ?"
+        if purpose_role:
+            query += " AND purpose_role = ?"
+            params.append(purpose_role)
+        if search:
+            pattern = f"%{search.strip()}%"
+            query += " AND (ip_address LIKE ? OR cidr_allocation LIKE ? OR purpose_role LIKE ? OR notes LIKE ?)"
+            params.extend([pattern, pattern, pattern, pattern])
+
+        if sort_by == "recent":
+            query += " ORDER BY updated_at DESC, created_at DESC"
+        elif sort_by == "ip_desc":
+            query += " ORDER BY ip_address DESC"
+        elif sort_by == "risk_desc":
+            query += " ORDER BY risk_score DESC, active_listing_count DESC"
+        elif sort_by == "ip_asc":
+            query += " ORDER BY ip_address ASC"
+        else:
+            query += " ORDER BY updated_at DESC, created_at DESC"
+
+        query += " LIMIT ? OFFSET ?"
         params.extend([limit, offset])
 
         with self._get_connection() as conn:
@@ -444,7 +466,9 @@ class IPIntelDatabaseMixin:
     def get_ip_inventory_count(
         self,
         monitoring_status: Optional[str] = None,
-        reputation_status: Optional[str] = None
+        reputation_status: Optional[str] = None,
+        purpose_role: Optional[str] = None,
+        search: Optional[str] = None
     ) -> int:
         query = "SELECT COUNT(*) FROM ip_intel_inventory WHERE 1=1"
         params: List[Any] = []
@@ -454,6 +478,13 @@ class IPIntelDatabaseMixin:
         if reputation_status:
             query += " AND current_reputation_status = ?"
             params.append(reputation_status)
+        if purpose_role:
+            query += " AND purpose_role = ?"
+            params.append(purpose_role)
+        if search:
+            pattern = f"%{search.strip()}%"
+            query += " AND (ip_address LIKE ? OR cidr_allocation LIKE ? OR purpose_role LIKE ? OR notes LIKE ?)"
+            params.extend([pattern, pattern, pattern, pattern])
 
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -469,6 +500,13 @@ class IPIntelDatabaseMixin:
                 return None
             cols = [d[0] for d in cursor.description]
             return dict(zip(cols, row))
+
+    def delete_ip_inventory_item(self, ip_address: str) -> bool:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM ip_intel_inventory WHERE ip_address = ?;", (ip_address,))
+            conn.commit()
+            return cursor.rowcount > 0
 
     def upsert_ip_inventory_item(
         self,

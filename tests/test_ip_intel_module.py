@@ -393,6 +393,22 @@ async def test_ip_intel_api_overview_and_check(admin_headers, analyst_headers):
         )
         assert res_add_unauth.status_code == 403
 
+        # Test Inventory Search & X-Total-Count Header
+        res_search = await client.get("/api/ip-intelligence/inventory?search=157.119.69.250", headers=analyst_headers)
+        assert res_search.status_code == 200
+        assert "x-total-count" in res_search.headers
+        search_items = res_search.json()
+        assert len(search_items) >= 1
+        assert any(it["ip_address"] == "157.119.69.250" for it in search_items)
+
+        # Test Delete Inventory IP (Analyst forbidden, Admin allowed)
+        res_del_unauth = await client.delete("/api/ip-intelligence/inventory/157.119.69.253", headers=analyst_headers)
+        assert res_del_unauth.status_code == 403
+
+        res_del_admin = await client.delete("/api/ip-intelligence/inventory/157.119.69.253", headers=admin_headers)
+        assert res_del_admin.status_code == 200
+        assert res_del_admin.json()["success"] is True
+
         # 4. Providers list and health test
         res_provs = await client.get("/api/ip-intelligence/providers", headers=analyst_headers)
         assert res_provs.status_code == 200

@@ -473,21 +473,136 @@ function startMonitoringScanProgress(scanId) {
 }
 
 // ---------------------------------------------------------------------------
-// 4. PUBLIC IP INVENTORY
+// 4. PUBLIC IP INVENTORY STATE & CONTROLS
 // ---------------------------------------------------------------------------
+let currentInvPage = 1;
+let currentInvLimit = 50;
+let currentInvSearch = "";
+let currentInvRole = "";
+let currentInvStatus = "";
+let currentInvSort = "recent";
+let currentInvTotal = 0;
+let invSearchDebounceTimer = null;
+
+function debounceInventorySearch() {
+  const input = document.getElementById("intel-inv-search");
+  const clearBtn = document.getElementById("intel-inv-search-clear");
+  const val = input ? input.value.trim() : "";
+  if (clearBtn) {
+    if (val.length > 0) clearBtn.classList.remove("hidden");
+    else clearBtn.classList.add("hidden");
+  }
+  clearTimeout(invSearchDebounceTimer);
+  invSearchDebounceTimer = setTimeout(() => {
+    currentInvSearch = val;
+    currentInvPage = 1;
+    loadIPIntelInventory();
+  }, 250);
+}
+
+function clearInventorySearch() {
+  const input = document.getElementById("intel-inv-search");
+  const clearBtn = document.getElementById("intel-inv-search-clear");
+  if (input) input.value = "";
+  if (clearBtn) clearBtn.classList.add("hidden");
+  currentInvSearch = "";
+  currentInvPage = 1;
+  loadIPIntelInventory();
+}
+
+function applyInventoryFilter() {
+  const roleEl = document.getElementById("intel-inv-role-filter");
+  const statusEl = document.getElementById("intel-inv-status-filter");
+  const sortEl = document.getElementById("intel-inv-sort");
+
+  currentInvRole = roleEl ? roleEl.value : "";
+  currentInvStatus = statusEl ? statusEl.value : "";
+  currentInvSort = sortEl ? sortEl.value : "recent";
+  currentInvPage = 1;
+  loadIPIntelInventory();
+}
+
+function changeInventoryLimit() {
+  const limitEl = document.getElementById("intel-inv-limit");
+  currentInvLimit = limitEl ? parseInt(limitEl.value, 10) || 50 : 50;
+  currentInvPage = 1;
+  loadIPIntelInventory();
+}
+
+function prevInventoryPage() {
+  if (currentInvPage > 1) {
+    currentInvPage--;
+    loadIPIntelInventory();
+  }
+}
+
+function nextInventoryPage() {
+  const maxPage = Math.max(1, Math.ceil(currentInvTotal / currentInvLimit));
+  if (currentInvPage < maxPage) {
+    currentInvPage++;
+    loadIPIntelInventory();
+  }
+}
+
 async function loadIPIntelInventory() {
   const tbody = document.getElementById("intel-inventory-tbody");
   if (!tbody) return;
 
+  const countInfo = document.getElementById("intel-inv-count-info");
+  const totalBadge = document.getElementById("intel-inv-total-badge");
+  const pageIndicator = document.getElementById("intel-inv-page-indicator");
+  const prevBtn = document.getElementById("intel-inv-prev-btn");
+  const nextBtn = document.getElementById("intel-inv-next-btn");
+
+  const offset = (currentInvPage - 1) * currentInvLimit;
+  const params = new URLSearchParams({
+    limit: String(currentInvLimit),
+    offset: String(offset),
+    sort_by: currentInvSort || "recent"
+  });
+  if (currentInvSearch) params.append("search", currentInvSearch);
+  if (currentInvRole) params.append("purpose_role", currentInvRole);
+  if (currentInvStatus) params.append("reputation_status", currentInvStatus);
+
   try {
-    const res = await fetch("/api/ip-intelligence/inventory?limit=100", {
+    const res = await fetch(`/api/ip-intelligence/inventory?${params.toString()}`, {
       headers: getAuthHeaders()
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const totalHeader = res.headers.get("X-Total-Count");
     const items = await res.json();
+    currentInvTotal = totalHeader ? parseInt(totalHeader, 10) : items.length;
+
+    // Update Badges & Pagination UI
+    if (totalBadge) totalBadge.textContent = `${currentInvTotal.toLocaleString()} IPs`;
+
+    const maxPage = Math.max(1, Math.ceil(currentInvTotal / currentInvLimit));
+    if (pageIndicator) pageIndicator.textContent = `Page ${currentInvPage} of ${maxPage}`;
+    if (prevBtn) prevBtn.disabled = currentInvPage <= 1;
+    if (nextBtn) nextBtn.disabled = currentInvPage >= maxPage;
+
+    if (countInfo) {
+      if (currentInvTotal === 0) {
+        countInfo.textContent = (currentInvSearch || currentInvRole || currentInvStatus)
+          ? "No matching IP addresses found"
+          : "No IP addresses in inventory";
+      } else {
+        const start = offset + 1;
+        const end = Math.min(offset + items.length, currentInvTotal);
+        countInfo.textContent = `Showing ${start}–${end} of ${currentInvTotal.toLocaleString()} IPs${(currentInvSearch || currentInvRole || currentInvStatus) ? ' (Filtered)' : ''}`;
+      }
+    }
 
     if (!items || items.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-slate-400">No public IP addresses configured in inventory. Click 'Add IP / Range' to register.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" class="text-center py-10 text-slate-400">
+        <div class="flex flex-col items-center justify-center gap-2">
+          <i data-lucide="search-x" class="w-8 h-8 text-slate-500"></i>
+          <span>No IP addresses found matching the current criteria.</span>
+          ${(currentInvSearch || currentInvRole || currentInvStatus) ? '<button onclick="clearInventorySearch(); document.getElementById(\'intel-inv-role-filter\').value=\'\'; document.getElementById(\'intel-inv-status-filter\').value=\'\'; applyInventoryFilter();" class="text-xs text-brand-400 hover:underline mt-1">Clear all filters</button>' : ''}
+        </div>
+      </td></tr>`;
+      if (window.lucide) lucide.createIcons();
       return;
     }
 
@@ -496,7 +611,7 @@ async function loadIPIntelInventory() {
         <td class="py-2.5 px-3">
           <div class="font-mono font-bold text-white text-xs flex items-center gap-1.5">
             ${it.ip_address}
-            <button onclick="copyToClipboard('${it.ip_address}', 'IP')" class="p-1 hover:text-white text-slate-400">
+            <button onclick="copyToClipboard('${it.ip_address}', 'IP')" class="p-1 hover:text-white text-slate-400" title="Copy IP">
               <i data-lucide="copy" class="w-3 h-3"></i>
             </button>
           </div>
@@ -530,9 +645,14 @@ async function loadIPIntelInventory() {
           ${it.last_checked_at ? formatManilaTime(it.last_checked_at) : 'Never'}
         </td>
         <td class="py-2.5 px-3 text-right">
-          <button onclick="quickCheckIP('${it.ip_address}')" class="px-2 py-1 rounded bg-dark-700 hover:bg-dark-600 text-slate-200 text-xs font-semibold border border-slate-600 transition-all">
-            Check Now
-          </button>
+          <div class="flex items-center justify-end gap-1.5">
+            <button onclick="quickCheckIP('${it.ip_address}')" class="px-2 py-1 rounded bg-dark-700 hover:bg-dark-600 text-slate-200 text-xs font-semibold border border-slate-600 transition-all flex items-center gap-1">
+              <i data-lucide="shield-check" class="w-3 h-3 text-cyan-400"></i> Check
+            </button>
+            <button onclick="deleteInventoryIP('${it.ip_address}')" class="p-1 rounded hover:bg-rose-950/40 text-slate-400 hover:text-rose-400 transition-all border border-transparent hover:border-rose-500/30" title="Delete IP">
+              <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
         </td>
       </tr>
     `).join("");
@@ -540,6 +660,23 @@ async function loadIPIntelInventory() {
     if (window.lucide) lucide.createIcons();
   } catch (e) {
     console.error("Inventory error:", e);
+    if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-rose-400">Failed to load inventory: ${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
+async function deleteInventoryIP(ip) {
+  if (!confirm(`Are you sure you want to remove ${ip} from the monitored inventory?`)) return;
+  try {
+    const res = await fetch(`/api/ip-intelligence/inventory/${encodeURIComponent(ip)}`, {
+      method: "DELETE",
+      headers: getAuthHeaders()
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || "Failed to remove IP");
+    showIntelToast(data.message || `Removed ${ip} from inventory!`, false);
+    loadIPIntelInventory();
+  } catch (e) {
+    showIntelToast(e.message, true);
   }
 }
 
@@ -595,7 +732,13 @@ async function addInventorySubmit() {
     if (ipEl) ipEl.value = "";
     if (cidrEl) cidrEl.value = "";
     if (notesEl) notesEl.value = "";
-    loadIPIntelInventory();
+
+    // Switch sort order to "recent" so the newly inserted/updated IPs appear at row 1 immediately!
+    currentInvSort = "recent";
+    const sortEl = document.getElementById("intel-inv-sort");
+    if (sortEl) sortEl.value = "recent";
+    currentInvPage = 1;
+    clearInventorySearch();
   } catch (e) {
     showIntelToast(e.message, true);
   }

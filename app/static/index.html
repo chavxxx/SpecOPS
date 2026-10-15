@@ -1621,6 +1621,7 @@
               <h3 class="text-sm font-bold text-white flex items-center gap-2">
                 <i data-lucide="database" class="w-4 h-4 text-cyan-400"></i>
                 Monitored Public IP Inventory
+                <span id="intel-inv-total-badge" class="px-2 py-0.5 rounded-full bg-dark-750 text-cyan-400 font-mono text-xs border border-slate-700">0 IPs</span>
               </h3>
               <p class="text-xs text-slate-400 mt-0.5">Authoritative registry of ISP public IP allocations, roles, and current reputation states</p>
             </div>
@@ -1631,6 +1632,43 @@
               <button id="btn-intel-add-ip-range" onclick="openAddInventoryModal()" class="px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow-md shadow-brand-600/30 flex items-center gap-1.5">
                 <i data-lucide="plus" class="w-3.5 h-3.5"></i> Add IP / Range
               </button>
+            </div>
+          </div>
+
+          <!-- Filter & Search Toolbar -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-2">
+            <div class="lg:col-span-2 relative">
+              <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-2.5"></i>
+              <input type="text" id="intel-inv-search" oninput="debounceInventorySearch()" placeholder="Search IP, CIDR, role, or notes..." class="w-full pl-9 pr-8 py-1.5 rounded-lg bg-dark-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 font-mono">
+              <button id="intel-inv-search-clear" onclick="clearInventorySearch()" class="hidden absolute right-2.5 top-2 text-slate-400 hover:text-white">
+                <i data-lucide="x" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+            <div>
+              <select id="intel-inv-role-filter" onchange="applyInventoryFilter()" class="w-full px-3 py-1.5 rounded-lg bg-dark-900 border border-slate-700 text-xs text-slate-200 focus:outline-none focus:border-cyan-500">
+                <option value="">All Roles</option>
+                <option value="CGNAT Pool">CGNAT Subscriber Pool</option>
+                <option value="Core Infrastructure">Core Infrastructure</option>
+                <option value="DNS / Mail Services">DNS / Mail Services</option>
+                <option value="Static Business">Static Business DIA</option>
+              </select>
+            </div>
+            <div>
+              <select id="intel-inv-status-filter" onchange="applyInventoryFilter()" class="w-full px-3 py-1.5 rounded-lg bg-dark-900 border border-slate-700 text-xs text-slate-200 focus:outline-none focus:border-cyan-500">
+                <option value="">All Reputations</option>
+                <option value="CLEAN">Clean Only</option>
+                <option value="LISTED">Listed</option>
+                <option value="HIGH_RISK">High Risk</option>
+                <option value="UNKNOWN">Unknown / Not Checked</option>
+              </select>
+            </div>
+            <div>
+              <select id="intel-inv-sort" onchange="applyInventoryFilter()" class="w-full px-3 py-1.5 rounded-lg bg-dark-900 border border-slate-700 text-xs text-slate-200 focus:outline-none focus:border-cyan-500">
+                <option value="recent" selected>Recently Added / Updated</option>
+                <option value="ip_asc">IP Address (Ascending)</option>
+                <option value="ip_desc">IP Address (Descending)</option>
+                <option value="risk_desc">Highest Risk Score</option>
+              </select>
             </div>
           </div>
 
@@ -1649,6 +1687,30 @@
               </thead>
               <tbody id="intel-inventory-tbody"></tbody>
             </table>
+          </div>
+
+          <!-- Inventory Pagination and Count Footer -->
+          <div class="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-800 text-xs text-slate-400">
+            <div id="intel-inv-count-info" class="font-medium">
+              Loading inventory...
+            </div>
+            <div class="flex items-center gap-2">
+              <label class="text-[11px] text-slate-400">Per page:</label>
+              <select id="intel-inv-limit" onchange="changeInventoryLimit()" class="px-2 py-1 rounded bg-dark-900 border border-slate-700 text-xs text-slate-200 focus:outline-none">
+                <option value="25">25</option>
+                <option value="50" selected>50</option>
+                <option value="100">100</option>
+                <option value="250">250</option>
+                <option value="1000">All (up to 1,000)</option>
+              </select>
+              <button id="intel-inv-prev-btn" onclick="prevInventoryPage()" disabled class="px-2.5 py-1 rounded bg-dark-800 hover:bg-dark-750 disabled:opacity-40 disabled:cursor-not-allowed border border-slate-700 text-slate-200 font-semibold flex items-center gap-1">
+                <i data-lucide="chevron-left" class="w-3.5 h-3.5"></i> Prev
+              </button>
+              <span id="intel-inv-page-indicator" class="font-mono text-slate-300 px-1">Page 1 of 1</span>
+              <button id="intel-inv-next-btn" onclick="nextInventoryPage()" disabled class="px-2.5 py-1 rounded bg-dark-800 hover:bg-dark-750 disabled:opacity-40 disabled:cursor-not-allowed border border-slate-700 text-slate-200 font-semibold flex items-center gap-1">
+                Next <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
           </div>
         </div>
       </div>

@@ -182,16 +182,31 @@ async def cancel_scan(
 # ---------------------------------------------------------------------------
 @router.get("/inventory", response_model=List[PublicIPInventoryItem])
 async def list_ip_inventory(
+    response: Response,
     monitoring_status: Optional[str] = None,
     reputation_status: Optional[str] = None,
-    limit: int = Query(100, ge=1, le=500),
+    purpose_role: Optional[str] = None,
+    search: Optional[str] = None,
+    sort_by: str = Query("recent"),
+    limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     db: DatabaseManager = Depends(get_db),
     user: UserResponse = Depends(require_read_or_admin)
 ):
+    total = db.get_ip_inventory_count(
+        monitoring_status=monitoring_status,
+        reputation_status=reputation_status,
+        purpose_role=purpose_role,
+        search=search
+    )
+    response.headers["X-Total-Count"] = str(total)
+    response.headers["Access-Control-Expose-Headers"] = "X-Total-Count"
     items = db.get_ip_inventory(
         monitoring_status=monitoring_status,
         reputation_status=reputation_status,
+        purpose_role=purpose_role,
+        search=search,
+        sort_by=sort_by,
         limit=limit,
         offset=offset
     )
@@ -294,6 +309,25 @@ async def update_inventory_ip(
         notes=req.notes if req.notes is not None else item.get("notes")
     )
     return {"success": True, "ip_address": ip_address}
+
+@router.delete("/inventory/{ip_address}", response_model=Dict[str, Any])
+async def delete_inventory_ip(
+    ip_address: str,
+    db: DatabaseManager = Depends(get_db),
+    user: UserResponse = Depends(require_admin)
+):
+    item = db.get_ip_inventory_item(ip_address)
+    if not item:
+        raise HTTPException(status_code=404, detail="IP address not found in inventory.")
+    db.delete_ip_inventory_item(ip_address)
+    db.log_ip_intel_audit(
+        username=user.username,
+        action="delete_inventory_ip",
+        target_type="ip",
+        target_id=ip_address,
+        details={"ip": ip_address}
+    )
+    return {"success": True, "message": f"Successfully removed {ip_address} from inventory."}
 
 # ---------------------------------------------------------------------------
 # 5. IP DETAILS, HISTORY & CORRELATIONS
