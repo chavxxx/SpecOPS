@@ -1589,6 +1589,21 @@
       </div>
 
       <form id="form-login" onsubmit="handleLoginSubmit(event)" class="space-y-4">
+        <!-- Default Administrator Credentials Prompt -->
+        <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-700/60 text-xs space-y-1.5">
+          <div class="flex items-center justify-between text-slate-400">
+            <span class="font-medium text-[11px] text-slate-300 flex items-center gap-1">
+              <i data-lucide="key" class="w-3.5 h-3.5 text-amber-400"></i> Default Credentials:
+            </span>
+            <button type="button" onclick="fillAdminCredentials()" class="text-[11px] text-cyan-400 hover:text-cyan-300 font-semibold underline underline-offset-2">
+              Auto-fill
+            </button>
+          </div>
+          <div class="font-mono text-[11px] text-slate-300 bg-dark-950 p-2 rounded border border-slate-800 flex items-center justify-between">
+            <span>User: <strong class="text-white">synchavxxx</strong> &bull; Pass: <strong class="text-white">passworD1369</strong></span>
+          </div>
+        </div>
+
         <div>
           <label class="block text-xs font-semibold text-slate-300 mb-1">Username</label>
           <input type="text" id="login-username" required placeholder="synchavxxx" class="form-input">
@@ -1602,6 +1617,12 @@
         <div class="pt-2">
           <button type="submit" class="w-full py-2.5 rounded-xl bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white text-xs font-bold shadow-lg shadow-brand-600/30 transition-all active:scale-95">
             Sign In
+          </button>
+        </div>
+
+        <div class="pt-1 text-center">
+          <button type="button" onclick="closeLoginModal()" class="text-xs text-slate-400 hover:text-slate-200 transition-colors">
+            Dismiss / Continue in Guest Mode
           </button>
         </div>
       </form>

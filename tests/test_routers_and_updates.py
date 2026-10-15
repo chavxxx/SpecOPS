@@ -154,3 +154,38 @@ async def test_system_clear_sample_data(test_db):
         data = clear_res.json()
         assert data["status"] == "success"
         assert "message" in data
+
+@pytest.mark.asyncio
+async def test_live_router_test_connection_endpoint(test_db):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Anonymous should be rejected
+        anon_res = await client.post("/api/routers/test-connection", json={
+            "host": "192.168.88.1",
+            "port": 8728
+        })
+        assert anon_res.status_code == 401
+
+        # Login as admin
+        login_res = await client.post("/api/auth/login", json={
+            "username": "synchavxxx",
+            "password": "passworD1369"
+        })
+        assert login_res.status_code == 200
+        token = login_res.json()["token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Test simulated / unreachable host returns structured diagnostic payload without 500 error
+        res = await client.post("/api/routers/test-connection", json={
+            "host": "100.91.0.1",
+            "port": 8728,
+            "username": "security_ro",
+            "password": "demo_password",
+            "use_ssl": False,
+            "use_rest": False
+        }, headers=headers)
+        assert res.status_code == 200
+        data = res.json()
+        assert "online" in data
+        assert data["online"] is True
+        assert "latency_ms" in data

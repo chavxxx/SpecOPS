@@ -271,12 +271,18 @@ async function performCGNATAttributionSearch() {
   if (btn) btn.disabled = true;
 
   try {
+    const authHeaders = typeof getAuthHeaders === "function" ? getAuthHeaders() : {};
     const res = await fetch("/api/cgnat/lookup", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders },
       body: JSON.stringify(payload),
       credentials: "include"
     });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Server responded with ${res.status}`);
+    }
 
     const data = await res.json();
     renderAttributionResult(data);
@@ -292,6 +298,11 @@ function renderAttributionResult(res) {
   const resultCard = document.getElementById("cgnat-result-card");
   if (!resultCard) return;
 
+  if (!res || !res.attribution_status) {
+    alert("No attribution record found for the specified query.");
+    return;
+  }
+
   resultCard.classList.remove("hidden");
 
   // Status badge styling
@@ -306,7 +317,7 @@ function renderAttributionResult(res) {
                      isPartial ? "bg-amber-500/20 text-amber-300 border-amber-500/40" : "bg-rose-500/20 text-rose-300 border-rose-500/40";
 
   statusEl.className = `px-2.5 py-1 rounded text-xs font-bold uppercase border ${colorClass}`;
-  statusEl.innerText = res.attribution_status.replace('_', ' ');
+  statusEl.innerText = (res.attribution_status || "UNKNOWN").replace('_', ' ');
 
   // Values
   document.getElementById("cgnat-res-sub-ip").innerText = res.subscriber_cgnat_ip || "UNRESOLVED";

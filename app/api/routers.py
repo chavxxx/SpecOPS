@@ -5,6 +5,7 @@ Provides full lifecycle management, testing, and telemetry for MikroTik RouterOS
 import time
 import logging
 from typing import List, Dict, Any, Optional
+from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
 
 from app.database.db import DatabaseManager, get_db
@@ -45,6 +46,38 @@ async def get_router(
         raise HTTPException(status_code=404, detail=f"Router '{router_id}' not found.")
     return r
 
+class RouterLiveTestRequest(BaseModel):
+    host: str
+    port: int = 8728
+    username: str = "security_ro"
+    password: str = ""
+    use_ssl: bool = False
+    use_rest: bool = False
+
+@router.post("/test-connection", response_model=Dict[str, Any])
+async def test_live_router_connection(
+    req: RouterLiveTestRequest,
+    user: UserResponse = Depends(require_read_or_admin)
+):
+    """
+    Actively tests connection to a MikroTik router using provided credentials
+    prior to or after onboarding.
+    """
+    host_clean = req.host.strip()
+    if not host_clean:
+        raise HTTPException(status_code=400, detail="Router IP address or hostname is required.")
+
+    client = MikroTikAPIClient(
+        host=host_clean,
+        port=req.port,
+        username=req.username,
+        password=req.password,
+        use_ssl=req.use_ssl,
+        use_rest=req.use_rest,
+        timeout=4.0
+    )
+    return client.test_connection()
+
 @router.post("", response_model=Dict[str, Any], status_code=201)
 async def onboard_router(
     req: RouterCreate,
@@ -70,6 +103,41 @@ async def onboard_router(
     router_data["host"] = host_clean
 
     router_id = db.create_router(router_data)
+
+    # Automatically test connectivity to populate initial telemetry
+    try:
+        client = MikroTikAPIClient(
+            host=host_clean,
+            port=req.port,
+            username=req.username,
+            password=req.password,
+            use_ssl=bool(req.use_ssl),
+            use_rest=bool(req.use_rest),
+            timeout=3.0
+        )
+        test_res = client.test_connection()
+        if test_res.get("online"):
+            db.update_router_telemetry(
+                router_id=router_id,
+                status="online",
+                model=test_res.get("board_name") or "MikroTik",
+                ros_version=test_res.get("routeros_version") or "v7",
+                cpu_load=test_res.get("cpu_load", 0),
+                uptime=test_res.get("uptime") or "unknown",
+                last_error=None
+            )
+        else:
+            db.update_router_telemetry(
+                router_id=router_id,
+                status="offline",
+                last_error=test_res.get("error_message") or "Host unreachable"
+            )
+    except Exception as e:
+        db.update_router_telemetry(
+            router_id=router_id,
+            status="offline",
+            last_error=str(e)
+        )
 
     # Record audit log
     db.log_audit_event(
@@ -395,71 +463,91 @@ async def sync_all_routers(
                 use_rest=bool(r.get("use_rest")),
                 timeout=4.0
             )
-            res = client.get_resource_usage()
-            latency_ms = round((time.time() - t0) * 1000, 2)
-            model = res.get("board-name") or res.get("platform") or "MikroTik"
-            ros_version = res.get("version") or "v7"
-            cpu_load = int(res.get("cpu-load", 0)) if "cpu-load" in res else None
-            uptime = res.get("uptime")
+            test_res = client.test_connection()
+            latency_ms = test_res.get("latency_ms", round((time.time() - t0) * 1000, 2))
 
-            db.update_router_telemetry(
-                router_id=r_id,
-                status="online",
-                model=model,
-                ros_version=ros_version,
-                cpu_load=cpu_load,
-                uptime=uptime,
-                last_error=None
-            )
-            router_online = True
-            online_count += 1
+            if test_res.get("online"):
+                model = test_res.get("board_name") or "MikroTik Router"
+                ros_version = test_res.get("routeros_version") or "v7"
+                cpu_load = test_res.get("cpu_load", 0)
+                uptime = test_res.get("uptime") or "unknown"
 
-            # Role-specific harvest
-            if r_role == "ac":
-                try:
-                    adapter = RouterOSSecurityAdapter(
-                        ac_host=r["host"],
-                        ac_port=r["port"],
-                        ac_user=r["username"],
-                        ac_pass=r["password"],
-                        ac_use_ssl=bool(r.get("use_ssl")),
-                        ac_use_rest=bool(r.get("use_rest")),
-                        db=db
-                    )
-                    sessions = adapter.harvest_active_pppoe_sessions(access_concentrator_id=r_id)
-                    harvested_for_this = len(sessions)
-                    total_sessions += harvested_for_this
-                except Exception as he:
-                    logger.warning(f"Session harvest error on AC {r_name}: {he}")
+                db.update_router_telemetry(
+                    router_id=r_id,
+                    status="online",
+                    model=model,
+                    ros_version=ros_version,
+                    cpu_load=cpu_load,
+                    uptime=uptime,
+                    last_error=None
+                )
+                router_online = True
+                online_count += 1
 
-            elif r_role == "core":
-                try:
-                    adapter = RouterOSSecurityAdapter(
-                        core_host=r["host"],
-                        core_port=r["port"],
-                        core_user=r["username"],
-                        core_pass=r["password"],
-                        core_use_ssl=bool(r.get("use_ssl")),
-                        core_use_rest=bool(r.get("use_rest")),
-                        db=db
-                    )
-                    adapter.inspect_core_nat_rules()
-                except Exception as ce:
-                    logger.warning(f"NAT audit error on Core {r_name}: {ce}")
+                # Role-specific harvest
+                if r_role == "ac":
+                    try:
+                        adapter = RouterOSSecurityAdapter(
+                            ac_host=r["host"],
+                            ac_port=r["port"],
+                            ac_user=r["username"],
+                            ac_pass=r["password"],
+                            ac_use_ssl=bool(r.get("use_ssl")),
+                            ac_use_rest=bool(r.get("use_rest")),
+                            db=db
+                        )
+                        sessions = adapter.harvest_active_pppoe_sessions(access_concentrator_id=r_id)
+                        harvested_for_this = len(sessions)
+                        total_sessions += harvested_for_this
+                    except Exception as he:
+                        logger.warning(f"Session harvest error on AC {r_name}: {he}")
 
-            results.append({
-                "id": r_id,
-                "name": r_name,
-                "role": r_role,
-                "online": True,
-                "model": model,
-                "ros_version": ros_version,
-                "cpu_load": cpu_load,
-                "uptime": uptime,
-                "latency_ms": latency_ms,
-                "sessions": harvested_for_this,
-                "status": "online"
-            })
+                elif r_role == "core":
+                    try:
+                        adapter = RouterOSSecurityAdapter(
+                            core_host=r["host"],
+                            core_port=r["port"],
+                            core_user=r["username"],
+                            core_pass=r["password"],
+                            core_use_ssl=bool(r.get("use_ssl")),
+                            core_use_rest=bool(r.get("use_rest")),
+                            db=db
+                        )
+                        adapter.inspect_core_nat_rules()
+                    except Exception as ce:
+                        logger.warning(f"NAT audit error on Core {r_name}: {ce}")
+
+                results.append({
+                    "id": r_id,
+                    "name": r_name,
+                    "role": r_role,
+                    "online": True,
+                    "model": model,
+                    "ros_version": ros_version,
+                    "cpu_load": cpu_load,
+                    "uptime": uptime,
+                    "latency_ms": latency_ms,
+                    "sessions": harvested_for_this,
+                    "status": "online"
+                })
+            else:
+                err_msg = test_res.get("error_message") or "Host unreachable"
+                offline_count += 1
+                db.update_router_telemetry(
+                    router_id=r_id,
+                    status="offline",
+                    last_error=err_msg
+                )
+                results.append({
+                    "id": r_id,
+                    "name": r_name,
+                    "role": r_role,
+                    "online": False,
+                    "status": "offline",
+                    "sessions": 0,
+                    "error": err_msg,
+                    "latency_ms": latency_ms
+                })
 
         except Exception as e:
             err_msg = str(e)

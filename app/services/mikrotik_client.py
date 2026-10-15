@@ -330,6 +330,23 @@ class MikroTikAPIClient:
             words.extend(queries)
         return self.talk(words)
 
+    def get_resource_usage(self) -> Dict[str, Any]:
+        """
+        Retrieves /system/resource metrics from the router.
+        Works across both binary API (8728/8729) and REST API (80/443).
+        """
+        try:
+            self.connect()
+            resource_list = self.talk(["/system/resource/print"])
+            self.close()
+            if resource_list:
+                return resource_list[0]
+            return {}
+        except Exception as e:
+            self.close()
+            logger.warning(f"Failed to fetch /system/resource from {self.host}:{self.port}: {e}")
+            raise
+
     # -------------------------------------------------------------
     # DIAGNOSTIC CONNECTION TEST
     # -------------------------------------------------------------

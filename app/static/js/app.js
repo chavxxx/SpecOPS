@@ -337,6 +337,13 @@ function updateAuthUI(user) {
   }
 }
 
+function fillAdminCredentials() {
+  const u = document.getElementById('login-username');
+  const p = document.getElementById('login-password');
+  if (u) u.value = 'synchavxxx';
+  if (p) p.value = 'passworD1369';
+}
+
 function openLoginModal(mandatory = false) {
   const modal = document.getElementById('modal-login');
   if (!modal) return;
@@ -345,18 +352,13 @@ function openLoginModal(mandatory = false) {
 
   const closeBtn = document.getElementById('btn-close-login');
   if (closeBtn) {
-    if (!currentUser) closeBtn.classList.add('hidden');
-    else closeBtn.classList.remove('hidden');
+    closeBtn.classList.remove('hidden');
   }
 
   setTimeout(() => document.getElementById('login-username')?.focus(), 50);
 }
 
 function closeLoginModal() {
-  if (!currentUser) {
-    showToast('Please sign in to access WISPnet SecOps Console', 'warning');
-    return;
-  }
   const modal = document.getElementById('modal-login');
   if (!modal) return;
   modal.classList.add('hidden');
@@ -1086,12 +1088,19 @@ async function handleSaveRouter(e) {
 }
 
 async function testModalRouterConnection() {
-  const routerId = document.getElementById('modal-router-id').value;
+  const routerId = document.getElementById('modal-router-id')?.value;
   const resBox = document.getElementById('modal-router-test-result');
   const btn = document.getElementById('btn-test-modal-router');
 
-  if (!routerId) {
-    showToast('Save the router first to run the live RouterOS connection test.', 'info');
+  const host = document.getElementById('modal-router-host')?.value.trim();
+  const port = parseInt(document.getElementById('modal-router-port')?.value || '8728', 10);
+  const username = document.getElementById('modal-router-user')?.value.trim() || 'security_ro';
+  const password = document.getElementById('modal-router-pass')?.value || '';
+  const use_ssl = document.getElementById('modal-router-ssl')?.checked || false;
+  const use_rest = document.getElementById('modal-router-rest')?.checked || false;
+
+  if (!routerId && !host) {
+    showToast('Please enter an IP address or hostname to test.', 'warning');
     return;
   }
 
@@ -1103,37 +1112,66 @@ async function testModalRouterConnection() {
   }
 
   try {
-    const res = await fetch(`/api/routers/${routerId}/test`, {
+    let url = `/api/routers/${routerId}/test`;
+    let options = {
       method: 'POST',
       headers: getAuthHeaders(),
       credentials: 'include'
-    });
+    };
 
+    if (!routerId) {
+      url = '/api/routers/test-connection';
+      options = {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders()
+        },
+        credentials: 'include',
+        body: JSON.stringify({ host, port, username, password, use_ssl, use_rest })
+      };
+    }
+
+    const res = await fetch(url, options);
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Connection test failed');
 
-    if (data.online) {
+    const isOnline = Boolean(data.online);
+    const model = data.model || data.board_name || 'MikroTik Router';
+    const rosVersion = data.ros_version || data.routeros_version || 'RouterOS v7';
+    const cpuLoad = data.cpu_load !== null && data.cpu_load !== undefined ? data.cpu_load + '%' : 'N/A';
+    const uptime = data.uptime || 'N/A';
+    const latency = data.latency_ms ? data.latency_ms.toFixed(1) + 'ms' : (data.response_time_ms ? data.response_time_ms.toFixed(1) + 'ms' : '< 1ms');
+    const pppoeCount = data.pppoe_count || data.active_pppoe_count || 0;
+    const errorMsg = data.error || data.error_message || 'Connection failed';
+
+    if (isOnline) {
       resBox.className = 'p-3 rounded-xl text-xs font-mono bg-emerald-950/40 border border-emerald-500/40 text-emerald-300';
       resBox.innerHTML = `
-        <div class="font-bold">✓ CONNECTION SUCCESSFUL</div>
-        <div>Model: ${escapeHtml(data.model || 'Unknown')}</div>
-        <div>RouterOS Version: ${escapeHtml(data.ros_version || 'Unknown')}</div>
-        <div>CPU Load: ${data.cpu_load !== null && data.cpu_load !== undefined ? data.cpu_load + '%' : 'N/A'} | Uptime: ${escapeHtml(data.uptime || 'N/A')}</div>
-        <div>Latency: ${data.response_time_ms ? data.response_time_ms.toFixed(1) + 'ms' : '< 1ms'}</div>
+        <div class="font-bold flex items-center gap-1.5"><i data-lucide="check-circle" class="w-4 h-4 text-emerald-400"></i> CONNECTION SUCCESSFUL</div>
+        <div class="mt-1">Model: <strong class="text-white">${escapeHtml(model)}</strong></div>
+        <div>RouterOS Version: <strong class="text-white">${escapeHtml(rosVersion)}</strong></div>
+        <div>CPU Load: <strong class="text-white">${cpuLoad}</strong> | Uptime: <strong class="text-white">${escapeHtml(uptime)}</strong></div>
+        <div>Active PPPoE Sessions: <strong class="text-white">${pppoeCount}</strong></div>
+        <div>Latency: <strong class="text-white">${latency}</strong></div>
       `;
+      showToast('Router connection verified successfully!', 'success');
     } else {
       resBox.className = 'p-3 rounded-xl text-xs font-mono bg-rose-950/40 border border-rose-500/40 text-rose-300';
       resBox.innerHTML = `
         <div class="font-bold">✗ CONNECTION FAILED</div>
-        <div>Error: ${escapeHtml(data.error || 'Host unreachable')}</div>
+        <div class="mt-1">Error: ${escapeHtml(errorMsg)}</div>
       `;
+      showToast(`Router connection failed: ${errorMsg}`, 'error');
     }
-    loadRouters();
+    if (window.lucide) lucide.createIcons();
+    if (routerId) loadRouters();
   } catch (err) {
     if (resBox) {
       resBox.className = 'p-3 rounded-xl text-xs font-mono bg-rose-950/40 border border-rose-500/40 text-rose-300';
       resBox.innerHTML = `<div>Error: ${escapeHtml(err.message)}</div>`;
     }
+    showToast(err.message, 'error');
   } finally {
     if (btn) btn.disabled = false;
   }
