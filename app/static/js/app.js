@@ -424,9 +424,15 @@ async function handleLogout() {
 // ============================================================================
 // USER MANAGEMENT CRUD
 // ============================================================================
-async function loadUsers() {
+async function loadUsers(manual = false) {
+  const spinIcon = document.getElementById('users-refresh-icon');
+  if (spinIcon) spinIcon.classList.add('animate-spin');
+
   const tbody = document.getElementById('users-table-body');
-  if (!tbody) return;
+  if (!tbody) {
+    if (spinIcon) spinIcon.classList.remove('animate-spin');
+    return;
+  }
 
   try {
     const res = await fetch('/api/users', {
@@ -480,7 +486,7 @@ async function loadUsers() {
           <td class="py-3 px-4 font-sans">${statusBadge}</td>
           <td class="py-3 px-4 text-slate-400 text-[11px]">${formatManilaTime(u.created_at)}</td>
           <td class="py-3 px-4 text-right space-x-2">
-            <button onclick="openEditUserModal('${u.id}')" class="px-2.5 py-1 rounded-lg bg-dark-800 hover:bg-dark-700 border border-slate-700 text-slate-200 text-xs font-semibold">
+            <button onclick="openEditUserModal('${u.id}')" class="px-2.5 py-1 rounded-lg bg-dark-800 hover:bg-dark-750 border border-slate-700 text-slate-200 text-xs font-semibold">
               Edit
             </button>
             <button onclick="deleteUser('${u.id}', '${encodeURIComponent(u.username)}')" class="px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-300 text-xs font-semibold">
@@ -492,6 +498,9 @@ async function loadUsers() {
     }).join('');
 
     if (window.lucide) lucide.createIcons();
+    if (manual) {
+      showToast('User accounts refreshed', 'success');
+    }
   } catch (err) {
     tbody.innerHTML = `
       <tr>
@@ -500,6 +509,11 @@ async function loadUsers() {
         </td>
       </tr>
     `;
+    if (manual) {
+      showToast('Failed to refresh users: ' + err.message, 'error');
+    }
+  } finally {
+    if (spinIcon) spinIcon.classList.remove('animate-spin');
   }
 }
 
@@ -659,9 +673,76 @@ async function deleteUser(userId, usernameEncoded) {
 let routerRoleFilter = 'all';
 let cachedRouters = [];
 
-async function loadRouters() {
+let isSyncingFleet = false;
+async function syncEverything() {
+  if (isSyncingFleet) return;
+  isSyncingFleet = true;
+
+  const iconIds = [
+    'global-sync-icon',
+    'routers-sync-icon',
+    'sec-overview-sync-icon',
+    'routers-refresh-icon',
+    'sec-overview-refresh-icon',
+    'sec-health-refresh-icon'
+  ];
+  const icons = iconIds.map(id => document.getElementById(id)).filter(Boolean);
+  icons.forEach(ic => ic.classList.add('animate-spin'));
+
+  try {
+    const authHeaders = typeof getAuthHeaders === 'function' ? getAuthHeaders() : {};
+    const res = await fetch('/api/routers/sync-all', {
+      method: 'POST',
+      headers: {
+        ...authHeaders,
+        'Content-Type': 'application/json'
+      },
+      credentials: 'include'
+    });
+
+    if (res.status === 401) {
+      showToast('Authentication required to sync fleet.', 'error');
+      if (typeof openLoginModal === 'function') openLoginModal();
+      return;
+    }
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
+    if (data.total_routers === 0) {
+      showToast('Router fleet is clean (0 routers). Click "+ Onboard Router" to connect your hardware.', 'info');
+    } else {
+      showToast(`Fleet sync complete: ${data.online_routers}/${data.total_routers} online (${data.sessions_harvested} sessions harvested)`, 'success');
+    }
+
+    // Refresh active components
+    if (typeof loadRouters === 'function') await loadRouters(false);
+    if (typeof loadSecurityOverview === 'function') await loadSecurityOverview(false);
+    if (typeof loadSensorHealth === 'function') await loadSensorHealth(false);
+    if (typeof loadIncidentManagement === 'function' && currentTab === 'sec-incidents') loadIncidentManagement(false);
+    if (typeof loadSecurityEvents === 'function' && currentTab === 'sec-events') loadSecurityEvents(secCurrentEventsPage || 0, false);
+  } catch (err) {
+    console.error('Fleet sync failed:', err);
+    showToast(`Fleet sync failed: ${err.message}`, 'error');
+  } finally {
+    icons.forEach(ic => ic.classList.remove('animate-spin'));
+    isSyncingFleet = false;
+    if (window.lucide) lucide.createIcons();
+  }
+}
+
+async function loadRouters(manual = false) {
+  const spinIcon = document.getElementById('routers-refresh-icon');
+  if (spinIcon) spinIcon.classList.add('animate-spin');
+
   const tbody = document.getElementById('routers-table-body');
-  if (!tbody) return;
+  if (!tbody) {
+    if (spinIcon) spinIcon.classList.remove('animate-spin');
+    return;
+  }
 
   try {
     const url = routerRoleFilter && routerRoleFilter !== 'all'
@@ -699,9 +780,18 @@ async function loadRouters() {
     if (badgeEl) badgeEl.innerText = routers.length;
 
     renderRoutersTable(routers);
+    if (manual) {
+      showToast('Router fleet refreshed', 'success');
+    }
   } catch (err) {
     console.error('Error loading routers:', err);
     tbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-rose-400">Failed to load routers: ${err.message}</td></tr>`;
+    if (manual) {
+      showToast('Failed to refresh routers: ' + err.message, 'error');
+    }
+  } finally {
+    if (spinIcon) spinIcon.classList.remove('animate-spin');
+    if (window.lucide) lucide.createIcons();
   }
 }
 

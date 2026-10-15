@@ -323,19 +323,6 @@ class SecurityDatabaseMixin:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], now, now) for r in default_rules])
 
-        # Default routers (Core CCR2116 & PPPoE AC CCR2116)
-        cursor.execute("SELECT COUNT(*) FROM routers")
-        if cursor.fetchone()[0] == 0:
-            now = get_utc_now_iso()
-            default_routers = [
-                ("router-core-ccr2116", "Core CCR2116 NAT Gateway", "core", "100.91.0.1", 8728, "security_ro", "********", 0, 0, "online", "CCR2116-12G-4S+", "v7.16", 14, "42d 18h", now, None, "Carrier CGNAT & BGP Core Gateway", 1, now, now),
-                ("router-ac-ccr2116", "PPPoE AC CCR2116", "ac", "100.91.0.254", 8728, "security_ro", "********", 0, 0, "online", "CCR2116-12G-4S+", "v7.16", 22, "42d 18h", now, None, "Primary PPPoE / IPoE Access Concentrator", 1, now, now)
-            ]
-            cursor.executemany("""
-                INSERT INTO routers (id, name, role, host, port, username, password, use_ssl, use_rest, status, model, ros_version, cpu_load, uptime, last_seen, last_error, notes, enabled, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, default_routers)
-
         # Default Integration Health entries
         cursor.execute("SELECT COUNT(*) FROM integration_health")
         if cursor.fetchone()[0] == 0:

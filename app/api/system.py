@@ -70,3 +70,38 @@ async def apply_github_update(
         raise HTTPException(status_code=500, detail=result.get("message", "Update failed"))
 
     return result
+
+@router.post("/clear-sample-data", response_model=Dict[str, Any])
+async def clear_sample_data(
+    db: DatabaseManager = Depends(get_db),
+    user: UserResponse = Depends(require_admin)
+):
+    """
+    Clears mock/sample data across routers, CGNAT mappings, subscriber sessions, and security events.
+    Preserves user accounts, sensors, and detection rules.
+    """
+    with db._get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM routers;")
+        cursor.execute("DELETE FROM cgnat_mappings;")
+        cursor.execute("DELETE FROM subscriber_sessions;")
+        cursor.execute("DELETE FROM security_events;")
+        cursor.execute("DELETE FROM incidents;")
+        cursor.execute("DELETE FROM incident_events;")
+        cursor.execute("DELETE FROM opensearch_queue;")
+        cursor.execute("DELETE FROM raw_events;")
+        cursor.execute("DELETE FROM notification_logs;")
+        conn.commit()
+
+    db.log_audit_event(
+        operator_id=user.username,
+        action="clear_sample_data",
+        target_type="database",
+        outcome="success",
+        details={"message": "Sample data cleared by operator"}
+    )
+
+    return {
+        "status": "success",
+        "message": "Sample data cleared. Fleet, sessions, and events are now clean for production onboarding."
+    }

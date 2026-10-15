@@ -30,20 +30,17 @@ async def test_router_onboarding_crud_and_roles(test_db):
         token = login_res.json()["token"]
         headers = {"Authorization": f"Bearer {token}"}
 
-        # 2. List initial routers (should include seeded core & ac routers)
+        # 2. List initial routers (fleet is clean slate ready for user onboarding)
         list_res = await client.get("/api/routers", headers=headers)
         assert list_res.status_code == 200
-        initial_routers = list_res.json()
-        assert len(initial_routers) >= 2
-        roles = [r["role"] for r in initial_routers]
-        assert "core" in roles
-        assert "ac" in roles
+        assert isinstance(list_res.json(), list)
 
-        # 3. Filter by role
-        core_res = await client.get("/api/routers?role=core", headers=headers)
-        assert core_res.status_code == 200
-        for r in core_res.json():
-            assert r["role"] == "core"
+        # 3. Test sync-all on empty fleet
+        sync_res = await client.post("/api/routers/sync-all", headers=headers)
+        assert sync_res.status_code == 200
+        sync_data = sync_res.json()
+        assert sync_data["status"] == "success"
+        assert sync_data["total_routers"] >= 0
 
         # 4. Onboard new Border Router
         new_router = {
@@ -63,7 +60,17 @@ async def test_router_onboarding_crud_and_roles(test_db):
         assert data["status"] == "success"
         router_id = data["router_id"]
 
-        # 5. Get single router
+        # 5. Filter by role
+        border_res = await client.get("/api/routers?role=border", headers=headers)
+        assert border_res.status_code == 200
+        assert any(r["id"] == router_id for r in border_res.json())
+
+        # 6. Test sync-all with onboarded router
+        sync_after_res = await client.post("/api/routers/sync-all", headers=headers)
+        assert sync_after_res.status_code == 200
+        assert sync_after_res.json()["total_routers"] >= 1
+
+        # 7. Get single router
         get_res = await client.get(f"/api/routers/{router_id}", headers=headers)
         assert get_res.status_code == 200
         r_info = get_res.json()
@@ -71,14 +78,14 @@ async def test_router_onboarding_crud_and_roles(test_db):
         assert r_info["role"] == "border"
         assert "password" not in r_info  # Password must NEVER be exposed
 
-        # 6. Test connectivity
+        # 8. Test connectivity
         test_res = await client.post(f"/api/routers/{router_id}/test", headers=headers)
         assert test_res.status_code == 200
         test_data = test_res.json()
         assert "online" in test_data
         assert test_data["role"] == "border"
 
-        # 7. Update router
+        # 9. Update router
         update_res = await client.put(f"/api/routers/{router_id}", json={
             "name": "Border BGP Gateway Edge-01 (Renamed)",
             "notes": "Updated rack position"
@@ -89,7 +96,7 @@ async def test_router_onboarding_crud_and_roles(test_db):
         get_after = await client.get(f"/api/routers/{router_id}", headers=headers)
         assert get_after.json()["name"] == "Border BGP Gateway Edge-01 (Renamed)"
 
-        # 8. Delete router
+        # 10. Delete router
         del_res = await client.delete(f"/api/routers/{router_id}", headers=headers)
         assert del_res.status_code == 200
 
@@ -123,3 +130,27 @@ async def test_system_info_and_update_check(test_db):
         assert "has_update" in check_data
         assert "current_commit" in check_data
         assert check_data["repo"] == "chavxxx/SpecOPS"
+
+@pytest.mark.asyncio
+async def test_system_clear_sample_data(test_db):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Anonymous should be rejected
+        anon_res = await client.post("/api/system/clear-sample-data")
+        assert anon_res.status_code == 401
+
+        # Login as admin
+        login_res = await client.post("/api/auth/login", json={
+            "username": "synchavxxx",
+            "password": "passworD1369"
+        })
+        assert login_res.status_code == 200
+        token = login_res.json()["token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Clear sample data
+        clear_res = await client.post("/api/system/clear-sample-data", headers=headers)
+        assert clear_res.status_code == 200
+        data = clear_res.json()
+        assert data["status"] == "success"
+        assert "message" in data

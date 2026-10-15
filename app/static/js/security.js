@@ -44,46 +44,61 @@ function copyToClipboard(text, label = "Value") {
   });
 }
 
-function showSecurityToast(msg) {
-  const toast = document.createElement("div");
-  toast.className = "fixed bottom-5 right-5 z-50 px-4 py-2.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold shadow-xl shadow-emerald-900/40 flex items-center gap-2 animate-bounce";
-  toast.innerHTML = `<i data-lucide="check" class="w-4 h-4"></i> <span>${msg}</span>`;
-  document.body.appendChild(toast);
-  if (window.lucide) lucide.createIcons();
-  setTimeout(() => {
-    toast.remove();
-  }, 2500);
+function showSecurityToast(msg, type = "success") {
+  if (typeof window.showToast === "function") {
+    window.showToast(msg, type);
+  } else {
+    const toast = document.createElement("div");
+    toast.className = `fixed bottom-5 right-5 z-50 px-4 py-2.5 rounded-lg ${type === 'error' ? 'bg-rose-600' : 'bg-emerald-600'} text-white text-xs font-semibold shadow-xl flex items-center gap-2 animate-bounce`;
+    toast.innerHTML = `<span>${msg}</span>`;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 2500);
+  }
 }
 
 // ---------------------------------------------------------------------------
 // PAGE 1: SECURITY OVERVIEW
 // ---------------------------------------------------------------------------
-async function loadSecurityOverview() {
+async function loadSecurityOverview(isManual = false) {
+  const spinIcon = document.getElementById("sec-overview-refresh-icon");
+  if (spinIcon) spinIcon.classList.add("animate-spin");
+
   try {
+    const authHeaders = typeof getAuthHeaders === "function" ? getAuthHeaders() : {};
+
     const [healthRes, incRes, evtRes] = await Promise.all([
-      fetch("/api/security/health", { credentials: "include" }),
-      fetch("/api/security/incidents?limit=10", { credentials: "include" }),
-      fetch("/api/security/events?limit=10", { credentials: "include" })
+      fetch("/api/security/health", { headers: authHeaders, credentials: "include" }),
+      fetch("/api/security/incidents?limit=10", { headers: authHeaders, credentials: "include" }),
+      fetch("/api/security/events?limit=10", { headers: authHeaders, credentials: "include" })
     ]);
 
-    const health = await healthRes.json();
-    const incidents = await incRes.json();
-    const events = await evtRes.json();
+    const health = healthRes.ok ? await healthRes.json() : {};
+    const incidents = incRes.ok ? await incRes.json() : {};
+    const events = evtRes.ok ? await evtRes.json() : {};
+
+    const incList = Array.isArray(incidents?.incidents) ? incidents.incidents : [];
+    const evtList = Array.isArray(events?.events) ? events.events : [];
 
     // Stats Cards
-    const criticalInc = incidents.incidents.filter(i => i.severity === "critical" && (i.status === "new" || i.status === "investigating")).length;
-    const highInc = incidents.incidents.filter(i => i.severity === "high" && (i.status === "new" || i.status === "investigating")).length;
-    const verifiedEvt = events.events.filter(e => e.attribution_status === "verified").length;
+    const criticalInc = incList.filter(i => i.severity === "critical" && (i.status === "new" || i.status === "investigating")).length;
+    const highInc = incList.filter(i => i.severity === "high" && (i.status === "new" || i.status === "investigating")).length;
+    const verifiedEvt = evtList.filter(e => e.attribution_status === "verified").length;
 
-    document.getElementById("sec-stat-crit-inc").innerText = criticalInc;
-    document.getElementById("sec-stat-high-inc").innerText = highInc;
-    document.getElementById("sec-stat-verified-attr").innerText = verifiedEvt;
-    document.getElementById("sec-stat-queue-depth").innerText = health.opensearch_queue_depth || 0;
+    const critEl = document.getElementById("sec-stat-crit-inc");
+    const highEl = document.getElementById("sec-stat-high-inc");
+    const verEl = document.getElementById("sec-stat-verified-attr");
+    const qEl = document.getElementById("sec-stat-queue-depth");
+
+    if (critEl) critEl.innerText = criticalInc;
+    if (highEl) highEl.innerText = highInc;
+    if (verEl) verEl.innerText = verifiedEvt;
+    if (qEl) qEl.innerText = health.opensearch_queue_depth || 0;
 
     // Integration Health Badges
     const healthBadgeContainer = document.getElementById("sec-health-badges");
     if (healthBadgeContainer) {
-      healthBadgeContainer.innerHTML = health.integrations.map(h => {
+      const integrations = Array.isArray(health.integrations) ? health.integrations : [];
+      healthBadgeContainer.innerHTML = integrations.map(h => {
         const isOnline = h.connectivity === "online";
         const color = isOnline ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30" : "bg-amber-500/20 text-amber-300 border-amber-500/30";
         return `
@@ -98,10 +113,10 @@ async function loadSecurityOverview() {
     // Incidents Table
     const incTbody = document.getElementById("sec-overview-incidents-body");
     if (incTbody) {
-      if (incidents.incidents.length === 0) {
+      if (incList.length === 0) {
         incTbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-slate-400 text-xs">No active security incidents</td></tr>`;
       } else {
-        incTbody.innerHTML = incidents.incidents.map(inc => {
+        incTbody.innerHTML = incList.map(inc => {
           const sevColor = inc.severity === "critical" ? "bg-rose-500/20 text-rose-300 border-rose-500/30" :
                            inc.severity === "high" ? "bg-amber-500/20 text-amber-300 border-amber-500/30" : "bg-blue-500/20 text-blue-300 border-blue-500/30";
           return `
@@ -126,15 +141,26 @@ async function loadSecurityOverview() {
     }
 
     if (window.lucide) lucide.createIcons();
+    if (isManual) {
+      showSecurityToast("Security overview refreshed", "success");
+    }
   } catch (e) {
     console.error("Error loading security overview:", e);
+    if (isManual) {
+      showSecurityToast("Failed to refresh: " + e.message, "error");
+    }
+  } finally {
+    if (spinIcon) spinIcon.classList.remove("animate-spin");
   }
 }
 
 // ---------------------------------------------------------------------------
 // PAGE 2: SECURITY EVENTS EXPLORER
 // ---------------------------------------------------------------------------
-async function loadSecurityEvents(page = 0) {
+async function loadSecurityEvents(page = 0, isManual = false) {
+  const spinIcon = document.getElementById("sec-events-refresh-icon");
+  if (spinIcon) spinIcon.classList.add("animate-spin");
+
   secCurrentEventsPage = page;
   const offset = page * SEC_PAGE_SIZE;
 
@@ -152,15 +178,17 @@ async function loadSecurityEvents(page = 0) {
   if (attrStatus) url += `&attribution_status=${encodeURIComponent(attrStatus)}`;
 
   try {
-    const res = await fetch(url, { credentials: "include" });
-    const data = await res.json();
+    const authHeaders = typeof getAuthHeaders === "function" ? getAuthHeaders() : {};
+    const res = await fetch(url, { headers: authHeaders, credentials: "include" });
+    const data = res.ok ? await res.json() : { events: [], total: 0 };
+    const eventList = Array.isArray(data?.events) ? data.events : [];
     const tbody = document.getElementById("sec-events-tbody");
 
     if (tbody) {
-      if (data.events.length === 0) {
+      if (eventList.length === 0) {
         tbody.innerHTML = `<tr><td colspan="10" class="text-center py-8 text-slate-400 text-xs">No matching security events found</td></tr>`;
       } else {
-        tbody.innerHTML = data.events.map(ev => {
+        tbody.innerHTML = eventList.map(ev => {
           const sevColor = ev.severity === "critical" ? "bg-rose-500/20 text-rose-300 border-rose-500/30" :
                            ev.severity === "high" ? "bg-amber-500/20 text-amber-300 border-amber-500/30" :
                            ev.severity === "medium" ? "bg-blue-500/20 text-blue-300 border-blue-500/30" : "bg-slate-700 text-slate-300 border-slate-600";
@@ -204,8 +232,16 @@ async function loadSecurityEvents(page = 0) {
     }
 
     if (window.lucide) lucide.createIcons();
+    if (isManual) {
+      showSecurityToast("Security events refreshed", "success");
+    }
   } catch (e) {
     console.error("Error loading security events:", e);
+    if (isManual) {
+      showSecurityToast("Failed to refresh events: " + e.message, "error");
+    }
+  } finally {
+    if (spinIcon) spinIcon.classList.remove("animate-spin");
   }
 }
 
@@ -325,15 +361,22 @@ async function fetchSubscriberProfile(cgnatIp) {
   if (!cgnatIp) return;
 
   try {
-    const res = await fetch(`/api/security/subscribers/${encodeURIComponent(cgnatIp)}`, { credentials: "include" });
-    const data = await res.json();
-    const prof = data.profile;
+    const authHeaders = typeof getAuthHeaders === "function" ? getAuthHeaders() : {};
+    const res = await fetch(`/api/security/subscribers/${encodeURIComponent(cgnatIp)}`, { headers: authHeaders, credentials: "include" });
+    const data = res.ok ? await res.json() : null;
+    const prof = data?.profile;
 
-    document.getElementById("sec-prof-header-ip").innerText = prof.subscriber_cgnat_ip;
+    if (!prof) {
+      document.getElementById("sec-prof-header-ip").innerText = cgnatIp;
+      document.getElementById("sec-prof-header-user").innerText = "No Profile Found";
+      return;
+    }
+
+    document.getElementById("sec-prof-header-ip").innerText = prof.subscriber_cgnat_ip || cgnatIp;
     document.getElementById("sec-prof-header-user").innerText = prof.current_username || "No Active Session Recorded";
-    document.getElementById("sec-prof-total-events").innerText = prof.metrics.total_security_events;
-    document.getElementById("sec-prof-total-bytes").innerText = (prof.metrics.total_bytes / 1000000).toFixed(2) + " MB";
-    document.getElementById("sec-prof-total-pkts").innerText = prof.metrics.total_packets.toLocaleString();
+    document.getElementById("sec-prof-total-events").innerText = prof.metrics?.total_security_events || 0;
+    document.getElementById("sec-prof-total-bytes").innerText = ((prof.metrics?.total_bytes || 0) / 1000000).toFixed(2) + " MB";
+    document.getElementById("sec-prof-total-pkts").innerText = (prof.metrics?.total_packets || 0).toLocaleString();
 
     // Copy buttons
     document.getElementById("btn-prof-copy-ip").onclick = () => copyToClipboard(prof.subscriber_cgnat_ip, "CGNAT IP");
@@ -384,7 +427,10 @@ async function fetchSubscriberProfile(cgnatIp) {
 // ---------------------------------------------------------------------------
 // PAGE 5: INCIDENT MANAGEMENT
 // ---------------------------------------------------------------------------
-async function loadIncidentManagement() {
+async function loadIncidentManagement(isManual = false) {
+  const spinIcon = document.getElementById("sec-incidents-refresh-icon");
+  if (spinIcon) spinIcon.classList.add("animate-spin");
+
   const status = document.getElementById("sec-inc-filter-status")?.value || "";
   const severity = document.getElementById("sec-inc-filter-severity")?.value || "";
 
@@ -393,15 +439,17 @@ async function loadIncidentManagement() {
   if (severity) url += `&severity=${encodeURIComponent(severity)}`;
 
   try {
-    const res = await fetch(url, { credentials: "include" });
-    const data = await res.json();
+    const authHeaders = typeof getAuthHeaders === "function" ? getAuthHeaders() : {};
+    const res = await fetch(url, { headers: authHeaders, credentials: "include" });
+    const data = res.ok ? await res.json() : { incidents: [], total: 0 };
+    const incList = Array.isArray(data?.incidents) ? data.incidents : [];
     const tbody = document.getElementById("sec-incidents-mgmt-tbody");
 
     if (tbody) {
-      if (data.incidents.length === 0) {
+      if (incList.length === 0) {
         tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-slate-400 text-xs">No incidents match current filter criteria</td></tr>`;
       } else {
-        tbody.innerHTML = data.incidents.map(inc => {
+        tbody.innerHTML = incList.map(inc => {
           const sevColor = inc.severity === "critical" ? "bg-rose-500/20 text-rose-300 border-rose-500/30" :
                            inc.severity === "high" ? "bg-amber-500/20 text-amber-300 border-amber-500/30" : "bg-blue-500/20 text-blue-300 border-blue-500/30";
 
@@ -424,8 +472,16 @@ async function loadIncidentManagement() {
     }
 
     if (window.lucide) lucide.createIcons();
+    if (isManual) {
+      showSecurityToast("Incidents refreshed", "success");
+    }
   } catch (e) {
     console.error("Error loading incidents:", e);
+    if (isManual) {
+      showSecurityToast("Failed to refresh incidents: " + e.message, "error");
+    }
+  } finally {
+    if (spinIcon) spinIcon.classList.remove("animate-spin");
   }
 }
 
@@ -437,10 +493,13 @@ async function openIncidentDetailModal(incidentId) {
   if (!modal) return;
 
   try {
-    const res = await fetch(`/api/security/incidents/${incidentId}`, { credentials: "include" });
-    const data = await res.json();
-    const inc = data.incident;
-    const events = data.related_events;
+    const authHeaders = typeof getAuthHeaders === "function" ? getAuthHeaders() : {};
+    const res = await fetch(`/api/security/incidents/${incidentId}`, { headers: authHeaders, credentials: "include" });
+    const data = res.ok ? await res.json() : null;
+    const inc = data?.incident;
+    const events = Array.isArray(data?.related_events) ? data.related_events : [];
+
+    if (!inc) return;
 
     document.getElementById("modal-inc-title").innerText = inc.title;
     document.getElementById("modal-inc-id").innerText = inc.incident_id;
@@ -491,9 +550,10 @@ async function saveIncidentStatusUpdate() {
   const notes = document.getElementById("modal-inc-notes").value.trim();
 
   try {
+    const authHeaders = typeof getAuthHeaders === "function" ? getAuthHeaders() : {};
     const res = await fetch(`/api/security/incidents/${activeModalIncidentId}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders },
       body: JSON.stringify({
         status: newStatus,
         resolution_notes: notes
@@ -520,48 +580,60 @@ async function saveIncidentStatusUpdate() {
 // ---------------------------------------------------------------------------
 async function loadTrafficAnalytics() {
   try {
-    const res = await fetch("/api/security/traffic/overview", { credentials: "include" });
-    const data = await res.json();
-    const an = data.analytics;
+    const authHeaders = typeof getAuthHeaders === "function" ? getAuthHeaders() : {};
+    const res = await fetch("/api/security/traffic/overview", { headers: authHeaders, credentials: "include" });
+    const data = res.ok ? await res.json() : { analytics: {} };
+    const an = data.analytics || {};
+    const topSubs = Array.isArray(an.top_subscribers) ? an.top_subscribers : [];
+    const topPubs = Array.isArray(an.top_public_ips) ? an.top_public_ips : [];
+    const protos = Array.isArray(an.protocols) ? an.protocols : [];
 
     // Top subscribers
     const subTbody = document.getElementById("sec-traffic-top-sub-tbody");
     if (subTbody) {
-      subTbody.innerHTML = an.top_subscribers.map((s, idx) => `
-        <tr class="border-b border-slate-800 text-xs">
-          <td class="py-2 px-3 font-mono font-bold text-slate-500">#${idx + 1}</td>
-          <td class="py-2 px-3 font-mono text-brand-300 font-semibold cursor-pointer hover:underline" onclick="openSubscriberProfile('${s.subscriber_cgnat_ip}')">${s.subscriber_cgnat_ip}</td>
-          <td class="py-2 px-3 font-mono text-slate-300">${(s.total_bytes / 1000000).toFixed(2)} MB</td>
-          <td class="py-2 px-3 font-mono text-slate-400">${s.total_packets.toLocaleString()}</td>
-          <td class="py-2 px-3 font-mono text-emerald-400 font-bold">${s.mbps_rate} Mbps</td>
-        </tr>
-      `).join("");
+      if (topSubs.length === 0) {
+        subTbody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-slate-400">No subscriber traffic data collected yet</td></tr>`;
+      } else {
+        subTbody.innerHTML = topSubs.map((s, idx) => `
+          <tr class="border-b border-slate-800 text-xs">
+            <td class="py-2 px-3 font-mono font-bold text-slate-500">#${idx + 1}</td>
+            <td class="py-2 px-3 font-mono text-brand-300 font-semibold cursor-pointer hover:underline" onclick="openSubscriberProfile('${s.subscriber_cgnat_ip}')">${s.subscriber_cgnat_ip}</td>
+            <td class="py-2 px-3 font-mono text-slate-300">${((s.total_bytes || 0) / 1000000).toFixed(2)} MB</td>
+            <td class="py-2 px-3 font-mono text-slate-400">${(s.total_packets || 0).toLocaleString()}</td>
+            <td class="py-2 px-3 font-mono text-emerald-400 font-bold">${s.mbps_rate || 0} Mbps</td>
+          </tr>
+        `).join("");
+      }
     }
 
     // Top public IPs
     const pubTbody = document.getElementById("sec-traffic-top-pub-tbody");
     if (pubTbody) {
-      pubTbody.innerHTML = an.top_public_ips.map((p, idx) => `
-        <tr class="border-b border-slate-800 text-xs">
-          <td class="py-2 px-3 font-mono font-bold text-slate-500">#${idx + 1}</td>
-          <td class="py-2 px-3 font-mono text-cyan-300 font-semibold">${p.public_ip}</td>
-          <td class="py-2 px-3 font-mono text-slate-300">${(p.total_bytes / 1000000).toFixed(2)} MB</td>
-          <td class="py-2 px-3 font-mono text-slate-400">${p.event_count}</td>
-        </tr>
-      `).join("");
+      if (topPubs.length === 0) {
+        pubTbody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-slate-400">No public IP traffic collected yet</td></tr>`;
+      } else {
+        pubTbody.innerHTML = topPubs.map((p, idx) => `
+          <tr class="border-b border-slate-800 text-xs">
+            <td class="py-2 px-3 font-mono font-bold text-slate-500">#${idx + 1}</td>
+            <td class="py-2 px-3 font-mono text-cyan-300 font-semibold">${p.public_ip}</td>
+            <td class="py-2 px-3 font-mono text-slate-300">${((p.total_bytes || 0) / 1000000).toFixed(2)} MB</td>
+            <td class="py-2 px-3 font-mono text-slate-400">${p.event_count || 0}</td>
+          </tr>
+        `).join("");
+      }
     }
 
     // Protocol breakdown
     const protoContainer = document.getElementById("sec-traffic-protocols");
     if (protoContainer) {
-      const totalBytes = an.protocols.reduce((sum, p) => sum + p.bytes, 0) || 1;
-      protoContainer.innerHTML = an.protocols.map(p => {
-        const pct = ((p.bytes / totalBytes) * 100).toFixed(1);
+      const totalBytes = protos.reduce((sum, p) => sum + (p.bytes || 0), 0) || 1;
+      protoContainer.innerHTML = protos.map(p => {
+        const pct = (((p.bytes || 0) / totalBytes) * 100).toFixed(1);
         return `
           <div class="space-y-1">
             <div class="flex justify-between text-xs font-mono">
               <span class="text-white font-bold">${p.protocol}</span>
-              <span class="text-slate-400">${(p.bytes / 1000000).toFixed(2)} MB (${pct}%)</span>
+              <span class="text-slate-400">${((p.bytes || 0) / 1000000).toFixed(2)} MB (${pct}%)</span>
             </div>
             <div class="w-full bg-dark-800 h-2 rounded-full overflow-hidden">
               <div class="bg-brand-500 h-full rounded-full" style="width: ${pct}%"></div>
@@ -580,26 +652,32 @@ async function loadTrafficAnalytics() {
 // ---------------------------------------------------------------------------
 async function loadDetectionRules() {
   try {
-    const res = await fetch("/api/security/rules", { credentials: "include" });
-    const rules = await res.json();
+    const authHeaders = typeof getAuthHeaders === "function" ? getAuthHeaders() : {};
+    const res = await fetch("/api/security/rules", { headers: authHeaders, credentials: "include" });
+    const rules = res.ok ? await res.json() : [];
+    const ruleList = Array.isArray(rules) ? rules : [];
     const tbody = document.getElementById("sec-rules-tbody");
 
     if (tbody) {
-      tbody.innerHTML = rules.map(r => `
-        <tr class="border-b border-slate-800 text-xs">
-          <td class="py-2.5 px-3">
-            <input type="checkbox" ${r.enabled ? 'checked' : ''} onchange="toggleRuleEnabled('${r.rule_id}', this.checked)" class="rounded bg-dark-800 border-slate-700 text-brand-500 focus:ring-0">
-          </td>
-          <td class="py-2.5 px-3 font-semibold text-white">${r.name}</td>
-          <td class="py-2.5 px-3 font-mono text-slate-400">${r.category}</td>
-          <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-700">${r.severity}</span></td>
-          <td class="py-2.5 px-3 font-mono text-slate-300">${r.time_window_seconds}s</td>
-          <td class="py-2.5 px-3 font-mono text-slate-400 text-[11px]">${JSON.stringify(r.threshold_configuration)}</td>
-          <td class="py-2.5 px-3 text-right">
-            <button onclick="testRuleAgainstHistory('${r.rule_id}')" class="px-2 py-1 rounded bg-dark-800 hover:bg-dark-750 text-cyan-300 text-[11px] border border-slate-700 mr-1">Test Rule</button>
-          </td>
-        </tr>
-      `).join("");
+      if (ruleList.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-slate-400">No detection rules found</td></tr>`;
+      } else {
+        tbody.innerHTML = ruleList.map(r => `
+          <tr class="border-b border-slate-800 text-xs">
+            <td class="py-2.5 px-3">
+              <input type="checkbox" ${r.enabled ? 'checked' : ''} onchange="toggleRuleEnabled('${r.rule_id}', this.checked)" class="rounded bg-dark-800 border-slate-700 text-brand-500 focus:ring-0">
+            </td>
+            <td class="py-2.5 px-3 font-semibold text-white">${r.name}</td>
+            <td class="py-2.5 px-3 font-mono text-slate-400">${r.category}</td>
+            <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-700">${r.severity}</span></td>
+            <td class="py-2.5 px-3 font-mono text-slate-300">${r.time_window_seconds}s</td>
+            <td class="py-2.5 px-3 font-mono text-slate-400 text-[11px]">${JSON.stringify(r.threshold_configuration)}</td>
+            <td class="py-2.5 px-3 text-right">
+              <button onclick="testRuleAgainstHistory('${r.rule_id}')" class="px-2 py-1 rounded bg-dark-800 hover:bg-dark-750 text-cyan-300 text-[11px] border border-slate-700 mr-1">Test Rule</button>
+            </td>
+          </tr>
+        `).join("");
+      }
     }
   } catch (e) {
     console.error("Error loading detection rules:", e);
@@ -608,9 +686,10 @@ async function loadDetectionRules() {
 
 async function toggleRuleEnabled(ruleId, isEnabled) {
   try {
+    const authHeaders = typeof getAuthHeaders === "function" ? getAuthHeaders() : {};
     await fetch(`/api/security/rules/${ruleId}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders },
       body: JSON.stringify({ enabled: isEnabled }),
       credentials: "include"
     });
@@ -622,8 +701,10 @@ async function toggleRuleEnabled(ruleId, isEnabled) {
 
 async function testRuleAgainstHistory(ruleId) {
   try {
+    const authHeaders = typeof getAuthHeaders === "function" ? getAuthHeaders() : {};
     const res = await fetch(`/api/security/rules/${ruleId}/test`, {
       method: "POST",
+      headers: authHeaders,
       credentials: "include"
     });
     const data = await res.json();
@@ -636,48 +717,72 @@ async function testRuleAgainstHistory(ruleId) {
 // ---------------------------------------------------------------------------
 // PAGE 8: SENSOR & INTEGRATION HEALTH
 // ---------------------------------------------------------------------------
-async function loadSensorHealth() {
+async function loadSensorHealth(isManual = false) {
+  const spinIcon = document.getElementById("sec-health-refresh-icon");
+  if (spinIcon) spinIcon.classList.add("animate-spin");
+
   try {
-    const res = await fetch("/api/security/health", { credentials: "include" });
-    const data = await res.json();
+    const authHeaders = typeof getAuthHeaders === "function" ? getAuthHeaders() : {};
+    const res = await fetch("/api/security/health", { headers: authHeaders, credentials: "include" });
+    const data = res.ok ? await res.json() : { integrations: [], sensors: [] };
+    const integrations = Array.isArray(data.integrations) ? data.integrations : [];
+    const sensors = Array.isArray(data.sensors) ? data.sensors : [];
 
     // Integrations list
     const intTbody = document.getElementById("sec-health-integrations-tbody");
     if (intTbody) {
-      intTbody.innerHTML = data.integrations.map(i => {
-        const isOnline = i.connectivity === "online";
-        return `
-          <tr class="border-b border-slate-800 text-xs">
-            <td class="py-2.5 px-3 font-semibold text-white flex items-center gap-2">
-              <span class="w-2.5 h-2.5 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}"></span>
-              ${i.integration_name}
-            </td>
-            <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${isOnline ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}">${i.connectivity}</span></td>
-            <td class="py-2.5 px-3 font-mono text-slate-300">${i.processing_lag_ms} ms</td>
-            <td class="py-2.5 px-3 font-mono text-slate-300">${i.queue_depth}</td>
-            <td class="py-2.5 px-3 font-mono text-slate-400">${formatManilaTime(i.last_successful_ingestion)}</td>
-            <td class="py-2.5 px-3 text-slate-400 text-[11px]">${i.last_error || 'None'}</td>
-          </tr>
-        `;
-      }).join("");
+      if (integrations.length === 0) {
+        intTbody.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-slate-400">No integration health data recorded</td></tr>`;
+      } else {
+        intTbody.innerHTML = integrations.map(i => {
+          const isOnline = i.connectivity === "online";
+          return `
+            <tr class="border-b border-slate-800 text-xs">
+              <td class="py-2.5 px-3 font-semibold text-white flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}"></span>
+                ${i.integration_name}
+              </td>
+              <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${isOnline ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}">${i.connectivity}</span></td>
+              <td class="py-2.5 px-3 font-mono text-slate-300">${i.processing_lag_ms} ms</td>
+              <td class="py-2.5 px-3 font-mono text-slate-300">${i.queue_depth}</td>
+              <td class="py-2.5 px-3 font-mono text-slate-400">${formatManilaTime(i.last_successful_ingestion)}</td>
+              <td class="py-2.5 px-3 text-slate-400 text-[11px]">${i.last_error || 'None'}</td>
+            </tr>
+          `;
+        }).join("");
+      }
     }
 
     // Sensors list
     const sensTbody = document.getElementById("sec-health-sensors-tbody");
     if (sensTbody) {
-      sensTbody.innerHTML = data.sensors.map(s => `
-        <tr class="border-b border-slate-800 text-xs">
-          <td class="py-2.5 px-3 font-semibold text-white">${s.sensor_name}</td>
-          <td class="py-2.5 px-3 font-mono text-slate-400">${s.sensor_id}</td>
-          <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${s.observation_point === 'pre_cgnat' ? 'bg-indigo-500/20 text-indigo-300' : 'bg-cyan-500/20 text-cyan-300'}">${s.observation_point}</span></td>
-          <td class="py-2.5 px-3 font-mono text-slate-300">${s.host}:${s.interface}</td>
-          <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-500/20 text-emerald-300">${s.health_status}</span></td>
-          <td class="py-2.5 px-3 font-mono text-slate-400">${formatManilaTime(s.last_seen)}</td>
-        </tr>
-      `).join("");
+      if (sensors.length === 0) {
+        sensTbody.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-slate-400">No sensors registered yet</td></tr>`;
+      } else {
+        sensTbody.innerHTML = sensors.map(s => `
+          <tr class="border-b border-slate-800 text-xs">
+            <td class="py-2.5 px-3 font-semibold text-white">${s.sensor_name}</td>
+            <td class="py-2.5 px-3 font-mono text-slate-400">${s.sensor_id}</td>
+            <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${s.observation_point === 'pre_cgnat' ? 'bg-indigo-500/20 text-indigo-300' : 'bg-cyan-500/20 text-cyan-300'}">${s.observation_point}</span></td>
+            <td class="py-2.5 px-3 font-mono text-slate-300">${s.host}:${s.interface}</td>
+            <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-500/20 text-emerald-300">${s.health_status}</span></td>
+            <td class="py-2.5 px-3 font-mono text-slate-400">${formatManilaTime(s.last_seen)}</td>
+          </tr>
+        `).join("");
+      }
+    }
+
+    if (window.lucide) lucide.createIcons();
+    if (isManual) {
+      showSecurityToast("Sensor health refreshed", "success");
     }
   } catch (e) {
     console.error("Error loading sensor health:", e);
+    if (isManual) {
+      showSecurityToast("Failed to refresh sensor health: " + e.message, "error");
+    }
+  } finally {
+    if (spinIcon) spinIcon.classList.remove("animate-spin");
   }
 }
 
@@ -686,8 +791,9 @@ async function loadSensorHealth() {
 // ---------------------------------------------------------------------------
 async function loadSecuritySettings() {
   try {
-    const res = await fetch("/api/security/settings", { credentials: "include" });
-    const data = await res.json();
+    const authHeaders = typeof getAuthHeaders === "function" ? getAuthHeaders() : {};
+    const res = await fetch("/api/security/settings", { headers: authHeaders, credentials: "include" });
+    const data = res.ok ? await res.json() : {};
 
     const cfg = data.cgnat_config || {};
     document.getElementById("sec-set-pub-start").value = cfg.public_pool_start || "";
@@ -733,9 +839,10 @@ async function saveSecuritySettings(e) {
   };
 
   try {
+    const authHeaders = typeof getAuthHeaders === "function" ? getAuthHeaders() : {};
     const res = await fetch("/api/security/settings", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders },
       body: JSON.stringify(payload),
       credentials: "include"
     });
@@ -748,7 +855,8 @@ async function saveSecuritySettings(e) {
 }
 
 function viewRawEventModal(eventId) {
-  fetch(`/api/security/events/${eventId}`, { credentials: "include" })
+  const authHeaders = typeof getAuthHeaders === "function" ? getAuthHeaders() : {};
+  fetch(`/api/security/events/${eventId}`, { headers: authHeaders, credentials: "include" })
     .then(r => r.json())
     .then(data => {
       alert(`Raw Event Payload (${eventId}):\n\n` + (data.raw_payload || JSON.stringify(data.event, null, 2)));
