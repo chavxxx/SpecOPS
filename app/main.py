@@ -57,6 +57,25 @@ app.add_middleware(
 # Core API Routes
 app.include_router(api_router)
 
+# Direct Root Mount & Aliases for proxies or direct clients that strip /api prefix
+from app.api.routers import router as routers_router, sync_all_routers
+from app.api.auth import require_read_or_admin
+from app.models.schemas import UserResponse
+from app.database.db import DatabaseManager
+from fastapi import Depends
+
+app.include_router(routers_router)
+
+@app.api_route("/fleet/sync", methods=["GET", "POST"], tags=["Router Onboarding & Hardware Management"])
+@app.api_route("/fleet-sync", methods=["GET", "POST"], tags=["Router Onboarding & Hardware Management"])
+@app.api_route("/sync", methods=["GET", "POST"], tags=["Router Onboarding & Hardware Management"])
+@app.api_route("/sync-all", methods=["GET", "POST"], tags=["Router Onboarding & Hardware Management"])
+async def root_direct_fleet_sync(
+    db: DatabaseManager = Depends(get_db),
+    user: UserResponse = Depends(require_read_or_admin)
+):
+    return await sync_all_routers(db=db, user=user)
+
 # System Health Endpoint
 @app.get("/healthz")
 async def health_check():

@@ -82,7 +82,7 @@ async def sync_all_routers(
     - Audits active CGNAT rules from Core Gateways
     - Updates integration health status
     """
-    routers = db.get_routers()
+    routers = db.get_routers(include_password=True)
     if not routers:
         return {
             "status": "success",
@@ -128,9 +128,9 @@ async def sync_all_routers(
         try:
             client = MikroTikAPIClient(
                 host=r["host"],
-                port=r["port"],
-                username=r["username"],
-                password=r["password"],
+                port=r.get("port", 8728),
+                username=r.get("username", "security_ro"),
+                password=r.get("password", ""),
                 use_ssl=bool(r.get("use_ssl")),
                 use_rest=bool(r.get("use_rest")),
                 timeout=4.0
@@ -156,14 +156,14 @@ async def sync_all_routers(
                 router_online = True
                 online_count += 1
 
-                # Role-specific harvest
-                if r_role == "ac":
+                # Role-appropriate telemetry and session harvesting
+                if r_role in ["ac", "core", "distribution", "other"]:
                     try:
                         adapter = RouterOSSecurityAdapter(
                             ac_host=r["host"],
-                            ac_port=r["port"],
-                            ac_user=r["username"],
-                            ac_pass=r["password"],
+                            ac_port=r.get("port", 8728),
+                            ac_user=r.get("username", "security_ro"),
+                            ac_pass=r.get("password", ""),
                             ac_use_ssl=bool(r.get("use_ssl")),
                             ac_use_rest=bool(r.get("use_rest")),
                             db=db
@@ -172,22 +172,22 @@ async def sync_all_routers(
                         harvested_for_this = len(sessions)
                         total_sessions += harvested_for_this
                     except Exception as he:
-                        logger.warning(f"Session harvest error on AC {r_name}: {he}")
+                        logger.warning(f"Session harvest note on {r_name} ({r_role}): {he}")
 
-                elif r_role == "core":
+                if r_role in ["core", "border", "distribution"]:
                     try:
                         adapter = RouterOSSecurityAdapter(
                             core_host=r["host"],
-                            core_port=r["port"],
-                            core_user=r["username"],
-                            core_pass=r["password"],
+                            core_port=r.get("port", 8728),
+                            core_user=r.get("username", "security_ro"),
+                            core_pass=r.get("password", ""),
                             core_use_ssl=bool(r.get("use_ssl")),
                             core_use_rest=bool(r.get("use_rest")),
                             db=db
                         )
                         adapter.inspect_core_nat_rules()
                     except Exception as ce:
-                        logger.warning(f"NAT audit error on Core {r_name}: {ce}")
+                        logger.warning(f"NAT audit note on {r_name} ({r_role}): {ce}")
 
                 results.append({
                     "id": r_id,
@@ -549,43 +549,31 @@ async def harvest_from_router(
 
     role = r.get("role", "core")
 
-    if role == "ac":
+    if role in ["ac", "core", "distribution", "other"]:
         from app.services.routeros_security import RouterOSSecurityAdapter
         adapter = RouterOSSecurityAdapter(
             ac_host=r["host"],
-            ac_port=r["port"],
-            ac_user=r["username"],
-            ac_pass=r["password"],
+            ac_port=r.get("port", 8728),
+            ac_user=r.get("username", "security_ro"),
+            ac_pass=r.get("password", ""),
             ac_use_ssl=bool(r.get("use_ssl")),
             ac_use_rest=bool(r.get("use_rest")),
             db=db
         )
         sessions = adapter.harvest_active_pppoe_sessions(access_concentrator_id=router_id)
+        
+        # If core also inspect NAT rules
+        nat_rules = []
+        if role in ["core", "border"]:
+            nat_rules = adapter.inspect_core_nat_rules()
+
         return {
             "status": "success",
             "router_id": router_id,
-            "role": "ac",
+            "role": role,
             "sessions_harvested": len(sessions),
-            "message": f"Successfully harvested {len(sessions)} active subscriber sessions from AC '{r['name']}'."
-        }
-    elif role == "core":
-        from app.services.routeros_security import RouterOSSecurityAdapter
-        adapter = RouterOSSecurityAdapter(
-            core_host=r["host"],
-            core_port=r["port"],
-            core_user=r["username"],
-            core_pass=r["password"],
-            core_use_ssl=bool(r.get("use_ssl")),
-            core_use_rest=bool(r.get("use_rest")),
-            db=db
-        )
-        rules = adapter.inspect_core_nat_rules()
-        return {
-            "status": "success",
-            "router_id": router_id,
-            "role": "core",
-            "nat_rules_audited": len(rules),
-            "message": f"Successfully audited {len(rules)} CGNAT src-nat firewall rules from Core '{r['name']}'."
+            "nat_rules_audited": len(nat_rules),
+            "message": f"Successfully harvested {len(sessions)} active sessions and audited {len(nat_rules)} NAT rules from '{r['name']}'."
         }
     else:
         return {

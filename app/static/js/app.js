@@ -693,46 +693,59 @@ async function syncEverything() {
 
   try {
     const authHeaders = typeof getAuthHeaders === 'function' ? getAuthHeaders() : {};
-    let res = await fetch('/api/routers/sync-all', {
-      method: 'POST',
-      headers: {
-        ...authHeaders,
-        'Content-Type': 'application/json'
-      },
-      credentials: 'include'
-    });
+    const candidateEndpoints = [
+      '/api/routers/sync-all',
+      '/api/routers/sync',
+      '/routers/sync-all',
+      '/routers/sync',
+      '/api/fleet/sync',
+      '/api/sync'
+    ];
 
-    if (res.status === 405 || res.status === 404) {
-      res = await fetch('/api/routers/sync', {
-        method: 'POST',
-        headers: {
-          ...authHeaders,
-          'Content-Type': 'application/json'
-        },
-        credentials: 'include'
-      });
+    let res = null;
+    let authFailed = false;
+
+    for (const ep of candidateEndpoints) {
+      try {
+        const response = await fetch(ep, {
+          method: 'POST',
+          headers: {
+            ...authHeaders,
+            'Content-Type': 'application/json'
+          },
+          credentials: 'include'
+        });
+
+        if (response.status === 401) {
+          authFailed = true;
+          break;
+        }
+
+        if (response.ok) {
+          res = response;
+          break;
+        }
+
+        // Keep last response if not 404/405
+        if (response.status !== 404 && response.status !== 405) {
+          res = response;
+          break;
+        }
+        res = response;
+      } catch (networkErr) {
+        // try next endpoint
+      }
     }
 
-    if (res.status === 405 || res.status === 404) {
-      res = await fetch('/api/fleet/sync', {
-        method: 'POST',
-        headers: {
-          ...authHeaders,
-          'Content-Type': 'application/json'
-        },
-        credentials: 'include'
-      });
-    }
-
-    if (res.status === 401) {
-      showToast('Authentication required to sync fleet.', 'error');
+    if (authFailed) {
+      showToast('Authentication required to sync fleet. Please sign in.', 'error');
       if (typeof openLoginModal === 'function') openLoginModal();
       return;
     }
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || `HTTP ${res.status}`);
+    if (!res || !res.ok) {
+      const err = res ? await res.json().catch(() => ({})) : {};
+      throw new Error(err.detail || (res ? `HTTP ${res.status}` : 'Server connection failed'));
     }
 
     const data = await res.json();
@@ -748,6 +761,9 @@ async function syncEverything() {
     if (typeof loadSensorHealth === 'function') await loadSensorHealth(false);
     if (typeof loadIncidentManagement === 'function' && currentTab === 'sec-incidents') loadIncidentManagement(false);
     if (typeof loadSecurityEvents === 'function' && currentTab === 'sec-events') loadSecurityEvents(secCurrentEventsPage || 0, false);
+    if (typeof loadIPIntelOverview === 'function' && currentTab === 'ip-intel') loadIPIntelOverview();
+    if (typeof loadTrafficAnalytics === 'function' && currentTab === 'sec-traffic') loadTrafficAnalytics();
+    if (typeof loadDetectionRules === 'function' && currentTab === 'sec-rules') loadDetectionRules();
   } catch (err) {
     console.error('Fleet sync failed:', err);
     showToast(`Fleet sync failed: ${err.message}`, 'error');

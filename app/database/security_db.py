@@ -1437,18 +1437,19 @@ class SecurityDatabaseMixin:
     # -------------------------------------------------------------
     # ROUTER MANAGEMENT & ONBOARDING METHODS
     # -------------------------------------------------------------
-    def get_routers(self, role: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_routers(self, role: Optional[str] = None, include_password: bool = False) -> List[Dict[str, Any]]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
+            pwd_col = ", password" if include_password else ""
             if role and role.lower() != "all":
-                cursor.execute("""
-                    SELECT id, name, role, host, port, username, use_ssl, use_rest,
+                cursor.execute(f"""
+                    SELECT id, name, role, host, port, username, use_ssl, use_rest{pwd_col},
                            status, model, ros_version, cpu_load, uptime, last_seen, last_error, notes, enabled, created_at, updated_at
                     FROM routers WHERE role = ? ORDER BY created_at ASC
                 """, (role.lower(),))
             else:
-                cursor.execute("""
-                    SELECT id, name, role, host, port, username, use_ssl, use_rest,
+                cursor.execute(f"""
+                    SELECT id, name, role, host, port, username, use_ssl, use_rest{pwd_col},
                            status, model, ros_version, cpu_load, uptime, last_seen, last_error, notes, enabled, created_at, updated_at
                     FROM routers ORDER BY created_at ASC
                 """)

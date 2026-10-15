@@ -29,7 +29,7 @@ def run_server(host="0.0.0.0", port=8000, reload=False):
         port=port,
         reload=reload,
         log_level="info",
-        access_log=False,
+        access_log=True,
         loop="auto",
         http="auto"
     )

@@ -115,7 +115,7 @@ class RouterOSSecurityAdapter:
 
     def harvest_active_pppoe_sessions(self, access_concentrator_id: str = "pppoe-ac-ccr2116") -> List[SubscriberSession]:
         """
-        Reads active PPPoE sessions from RouterOS v7 /ppp/active
+        Reads active PPPoE and Hotspot sessions from RouterOS v7.
         Stores time-bounded session records in subscriber_sessions.
         """
         now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -130,7 +130,6 @@ class RouterOSSecurityAdapter:
                 user = item.get("name")
                 cgnat_ip = item.get("address")
                 session_id = item.get(".id", str(uuid.uuid4()))
-                uptime = item.get("uptime", "")
 
                 if user and cgnat_ip:
                     sess = SubscriberSession(
@@ -139,7 +138,7 @@ class RouterOSSecurityAdapter:
                         subscriber_cgnat_ip=cgnat_ip,
                         access_concentrator=access_concentrator_id,
                         router_session_id=session_id,
-                        started_at=now_iso, # will update if existing
+                        started_at=now_iso,
                         ended_at=None,
                         session_source="routeros_active",
                         last_synchronized_at=now_iso
@@ -147,11 +146,39 @@ class RouterOSSecurityAdapter:
                     self.db.upsert_subscriber_session(sess)
                     sessions.append(sess)
 
+            # Also attempt to harvest active Hotspot sessions if running on this router
+            try:
+                self.ac_client.connect()
+                raw_hotspot = self.ac_client.talk(["/ip/hotspot/active/print"])
+                self.ac_client.close()
+
+                for item in raw_hotspot:
+                    user = item.get("user")
+                    cgnat_ip = item.get("address")
+                    session_id = item.get(".id", str(uuid.uuid4()))
+
+                    if user and cgnat_ip:
+                        sess = SubscriberSession(
+                            session_id=f"sess-hs-{access_concentrator_id}-{user}",
+                            pppoe_username=f"hs:{user}",
+                            subscriber_cgnat_ip=cgnat_ip,
+                            access_concentrator=access_concentrator_id,
+                            router_session_id=session_id,
+                            started_at=now_iso,
+                            ended_at=None,
+                            session_source="routeros_hotspot",
+                            last_synchronized_at=now_iso
+                        )
+                        self.db.upsert_subscriber_session(sess)
+                        sessions.append(sess)
+            except Exception as e_hs:
+                logger.debug(f"Hotspot harvest note on {access_concentrator_id}: {e_hs}")
+
             self.db.update_integration_health("RouterOS-PPPoE-AC", "online", lag_ms=12.0)
             return sessions
 
         except Exception as e:
-            logger.error(f"Error harvesting PPPoE active sessions: {e}")
+            logger.error(f"Error harvesting subscriber active sessions: {e}")
             self.db.update_integration_health("RouterOS-PPPoE-AC", "degraded", error=str(e))
             return []
 
@@ -164,7 +191,9 @@ class RouterOSSecurityAdapter:
             self.core_client.connect()
             rules = self.core_client.talk(["/ip/firewall/nat/print", "?chain=srcnat", "?action=src-nat"])
             self.core_client.close()
+            self.db.update_integration_health("RouterOS-Core", "online", lag_ms=10.0)
             return rules
         except Exception as e:
             logger.warning(f"Failed to inspect Core Router NAT rules: {e}")
+            self.db.update_integration_health("RouterOS-Core", "degraded", error=str(e))
             return []

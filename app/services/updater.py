@@ -136,9 +136,21 @@ class SystemUpdater:
 
             new_commit = self.get_current_commit()
 
+            # If running as systemd service on Linux, schedule a graceful service restart
+            if not os.getenv("PYTEST_CURRENT_TEST"):
+                import threading
+                def _delayed_restart():
+                    import time
+                    time.sleep(2.0)
+                    try:
+                        subprocess.run(["systemctl", "try-restart", "wispnet.service"], timeout=5)
+                    except Exception:
+                        pass
+                threading.Thread(target=_delayed_restart, daemon=True).start()
+
             return {
                 "status": "success",
-                "message": f"Successfully updated SpecOPS to commit {new_commit['short_commit']}.",
+                "message": f"Successfully updated SpecOPS to commit {new_commit['short_commit']}. Service restart scheduled.",
                 "commit": new_commit["short_commit"],
                 "commit_message": new_commit["message"],
                 "restart_required": True

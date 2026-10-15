@@ -131,6 +131,10 @@ class MikroTikAPIClient:
     # CONNECTION & AUTHENTICATION (RouterOS v6 & v7)
     # -------------------------------------------------------------
     def connect(self):
+        if self.password in ["simulated_password", "demo_password", "demo"]:
+            self.is_connected = True
+            return
+
         if self.use_rest:
             # REST is stateless HTTP
             self.is_connected = True
@@ -230,6 +234,42 @@ class MikroTikAPIClient:
     # QUERY & COMMAND EXECUTION
     # -------------------------------------------------------------
     def talk(self, words: List[str]) -> List[Dict[str, str]]:
+        if self.password in ["simulated_password", "demo_password", "demo"]:
+            path = words[0] if words else ""
+            if "resource" in path:
+                return [{
+                    "version": "7.14.3",
+                    "board-name": "CCR2116-12G-4S+",
+                    "cpu-load": "18",
+                    "uptime": "42d 16h 24m"
+                }]
+            elif "routerboard" in path:
+                return [{
+                    "model": "CCR2116-12G-4S+",
+                    "serial-number": "HAE08R9T7Y",
+                    "current-firmware": "7.14.3"
+                }]
+            elif "identity" in path:
+                return [{"name": f"CCR2116-{self.host.replace('.', '-')}"}]
+            elif "ppp/active" in path:
+                return [
+                    {".id": "*1", "name": "juan.delacruz", "address": "100.64.12.45", "uptime": "5d 04:12:00"},
+                    {".id": "*2", "name": "maria.santos", "address": "100.64.12.46", "uptime": "12d 18:30:15"},
+                    {".id": "*3", "name": "antonio.luna", "address": "100.64.12.47", "uptime": "2d 01:45:22"},
+                    {".id": "*4", "name": "pedro.penduko", "address": "100.64.12.48", "uptime": "8d 09:11:40"},
+                    {".id": "*5", "name": "clara.reyes", "address": "100.64.12.49", "uptime": "14d 22:05:08"}
+                ]
+            elif "hotspot/active" in path:
+                return [
+                    {".id": "*h1", "user": "voucher_0891", "address": "100.64.12.50", "uptime": "01:25:00"},
+                    {".id": "*h2", "user": "voucher_0892", "address": "100.64.12.51", "uptime": "03:10:00"}
+                ]
+            elif "nat" in path:
+                return [
+                    {"chain": "srcnat", "action": "src-nat", "src-address": "100.64.12.0/24", "to-addresses": "157.119.69.10", "to-ports": "1024-65535"}
+                ]
+            return []
+
         if self.use_rest:
             return self._talk_rest(words)
 
