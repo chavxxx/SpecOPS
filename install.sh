@@ -209,9 +209,13 @@ else
     fi
   elif [ -n "$TOKEN" ]; then
     echo "Cloning via GitHub PAT token..."
-    if ! git clone --branch "${BRANCH}" --depth 1 "https://${TOKEN}@github.com/chavxxx/SpecOPS.git" "${INSTALL_DIR}" 2>/dev/null; then
-      echo "Fetching tarball via GitHub API..."
-      curl -fsSL -H "Authorization: token ${TOKEN}" "https://api.github.com/repos/chavxxx/SpecOPS/tarball/${BRANCH}" -o /tmp/wispnet.tar.gz
+    if git clone --branch "${BRANCH}" --depth 1 "https://x-access-token:${TOKEN}@github.com/chavxxx/SpecOPS.git" "${INSTALL_DIR}" 2>/dev/null || \
+       git clone --branch "${BRANCH}" --depth 1 "https://${TOKEN}@github.com/chavxxx/SpecOPS.git" "${INSTALL_DIR}" 2>/dev/null; then
+      echo "✓ Clone successful. Scrubbing token from git config..."
+      git -C "${INSTALL_DIR}" remote set-url origin "https://github.com/chavxxx/SpecOPS.git" 2>/dev/null || true
+    else
+      echo "Direct git clone failed; fetching tarball via GitHub REST API..."
+      curl -fsSL -H "Authorization: Bearer ${TOKEN}" "https://api.github.com/repos/chavxxx/SpecOPS/tarball/${BRANCH}" -o /tmp/wispnet.tar.gz
       tar -xzf /tmp/wispnet.tar.gz --strip-components=1 -C "${INSTALL_DIR}"
       rm -f /tmp/wispnet.tar.gz
     fi

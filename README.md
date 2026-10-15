@@ -63,8 +63,17 @@ A carrier-grade, unified security operations platform built specifically for Phi
 Run this single command on your Ubuntu, Debian, RHEL, Rocky Linux, or macOS host to automatically install all OS prerequisites, stage the application, configure Python virtual environments, initialize the security database, run the verification test suite, register the systemd service, and open firewall ports:
 
 ```bash
-# Production Deployment with Sample Carrier Telemetry & CGNAT Mappings
-curl -sSL https://raw.githubusercontent.com/chavxxx/SpecOPS/main/install.sh | sudo bash -s -- --seed-demo
+# 1-Liner with GitHub Personal Access Token (for Private Repo)
+TOKEN="your_github_pat_here"
+curl -fsSL -H "Authorization: token ${TOKEN}" -H "Accept: application/vnd.github.v3.raw" \
+  "https://api.github.com/repos/chavxxx/SpecOPS/contents/install.sh" | sudo bash -s -- --token "${TOKEN}" --seed-demo
+```
+
+### Alternatively (via raw.githubusercontent.com):
+```bash
+TOKEN="your_github_pat_here"
+curl -fsSL -H "Authorization: token ${TOKEN}" \
+  "https://raw.githubusercontent.com/chavxxx/SpecOPS/main/install.sh" | sudo bash -s -- --token "${TOKEN}" --seed-demo
 ```
 
 ### Local Cloned Repository 1-Liner
