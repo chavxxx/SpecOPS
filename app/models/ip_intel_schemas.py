@@ -29,6 +29,7 @@ class ProviderType(str, Enum):
     ABUSE_API = "abuse_api"
     THREAT_INTEL = "threat_intel"
     EMAIL_REPUTATION = "email_reputation"
+    GAMING_INTEL = "gaming_intel"
 
 class MonitoringStatus(str, Enum):
     ACTIVE = "active"
@@ -239,3 +240,33 @@ class IPInvestigationItem(BaseModel):
     assigned_operator: Optional[str] = None
     created_at: str
     updated_at: str
+
+# ---------------------------------------------------------------------------
+# Online Gaming & Anti-Cheat Compatibility Schemas
+# ---------------------------------------------------------------------------
+class GameCompatibilityStatus(str, Enum):
+    EXCELLENT = "EXCELLENT"      # Green: Low latency (<50ms), clean IP, ISP-classified
+    COMPATIBLE = "COMPATIBLE"    # Green: Clean IP, acceptable latency (<120ms)
+    RESTRICTED = "RESTRICTED"    # Amber: High latency, possible NAT/PTR issue
+    BLOCKED = "BLOCKED"          # Red: Flagged on anti-cheat blacklist or unreachable
+
+class GameServiceItem(BaseModel):
+    game_id: str
+    game_name: str
+    category: str
+    endpoint: str
+    status: GameCompatibilityStatus
+    latency_ms: float
+    port_requirements: str
+    anti_cheat_engine: str
+    notes: str
+
+class GamingCompatibilitySummary(BaseModel):
+    ip_address: str
+    overall_grade: str           # "A+", "A", "B", "C", "F"
+    overall_status: GameCompatibilityStatus
+    anti_cheat_risk: str         # "LOW", "MODERATE", "HIGH", "CRITICAL"
+    nat_suitability: str         # "NAT Type 2 (Moderate / Open Recommended)", etc.
+    isp_classification: str      # "Residential / Wireless ISP", "CGNAT Subscriber Pool", etc.
+    games: List[GameServiceItem] = []
+    recommendations: List[str] = []

@@ -32,6 +32,7 @@ from app.services.ip_intel.virustotal_provider import VirusTotalProvider
 from app.services.ip_intel.greynoise_provider import GreyNoiseProvider
 from app.services.ip_intel.cisco_talos_provider import CiscoTalosProvider
 from app.services.ip_intel.rdns_provider import ReverseDNSProvider
+from app.services.ip_intel.gaming_provider import GamingCompatibilityProvider
 from app.services.ip_intel.scoring_engine import ReputationScoringEngine
 from app.services.ip_intel.cgnat_correlation import CGNATReputationCorrelator
 from app.services.notification_service import get_notification_service
@@ -59,6 +60,8 @@ class IPIntelScanner:
             return CiscoTalosProvider(prov_conf)
         elif prov_id == "rdns_ptr":
             return ReverseDNSProvider(prov_conf)
+        elif prov_id == "gaming_compat" or prov_conf.get("provider_type") == "gaming_intel":
+            return GamingCompatibilityProvider(prov_conf)
         else:
             return DNSBLProvider(prov_conf)
 

@@ -413,9 +413,28 @@ async def test_ip_intel_api_overview_and_check(admin_headers, analyst_headers):
         res_provs = await client.get("/api/ip-intelligence/providers", headers=analyst_headers)
         assert res_provs.status_code == 200
         provs = res_provs.json()
-        assert len(provs) >= 8
+        assert len(provs) >= 9
+        assert any(p["provider_id"] == "gaming_compat" for p in provs)
 
-        # Admin tests provider connectivity
+        # Admin tests provider connectivity (rDNS and gaming_compat)
         res_test = await client.post("/api/ip-intelligence/providers/rdns_ptr/test", headers=admin_headers)
         assert res_test.status_code == 200
         assert res_test.json()["provider_id"] == "rdns_ptr"
+
+        res_test_gaming = await client.post("/api/ip-intelligence/providers/gaming_compat/test", headers=admin_headers)
+        assert res_test_gaming.status_code == 200
+        assert res_test_gaming.json()["provider_id"] == "gaming_compat"
+
+        # 5. Online Gaming & Anti-Cheat Compatibility endpoint
+        res_gaming = await client.get("/api/ip-intelligence/ip/157.119.69.129/gaming", headers=analyst_headers)
+        assert res_gaming.status_code == 200
+        gaming_data = res_gaming.json()
+        assert gaming_data["ip_address"] == "157.119.69.129"
+        assert gaming_data["overall_grade"] in ("A+", "A", "B", "C", "F")
+        assert len(gaming_data["games"]) >= 8
+        game_ids = [g["game_id"] for g in gaming_data["games"]]
+        assert "codm_garena" in game_ids
+        assert "codm_activision" in game_ids
+        assert "mlbb" in game_ids
+        assert "valorant_riot" in game_ids
+        assert "roblox" in game_ids

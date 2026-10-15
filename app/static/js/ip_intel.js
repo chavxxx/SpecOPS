@@ -365,6 +365,126 @@ function renderSingleLookupResult(data) {
     }
   }
 
+  // 6. Online Gaming & Anti-Cheat Compatibility Assessment
+  const gamingRes = data.provider_results ? data.provider_results.find(r => r.provider_id === "gaming_compat") : null;
+  if (gamingRes && gamingRes.raw_reference) {
+    renderGamingCompatibilityCard(gamingRes.raw_reference, data.ip_address);
+  } else {
+    fetch(`/api/ip-intelligence/ip/${encodeURIComponent(data.ip_address)}/gaming`, { headers: getAuthHeaders() })
+      .then(r => r.ok ? r.json() : null)
+      .then(summary => { if (summary) renderGamingCompatibilityCard(summary, data.ip_address); })
+      .catch(() => {});
+  }
+
+  if (window.lucide) lucide.createIcons();
+}
+
+function renderGamingCompatibilityCard(gaming, ip) {
+  const card = document.getElementById("intel-res-gaming-card");
+  const gradeContainer = document.getElementById("intel-res-gaming-grade-container");
+  const body = document.getElementById("intel-res-gaming-body");
+  if (!card || !body) return;
+
+  if (!gaming) {
+    card.classList.add("hidden");
+    return;
+  }
+  card.classList.remove("hidden");
+
+  const gradeColors = {
+    "A+": "bg-emerald-500/20 text-emerald-300 border-emerald-500/40",
+    "A": "bg-teal-500/20 text-teal-300 border-teal-500/40",
+    "B": "bg-blue-500/20 text-blue-300 border-blue-500/40",
+    "C": "bg-amber-500/20 text-amber-300 border-amber-500/40",
+    "F": "bg-rose-600/30 text-rose-300 border-rose-500/40 animate-pulse"
+  };
+
+  if (gradeContainer) {
+    gradeContainer.innerHTML = `
+      <div class="flex items-center gap-2">
+        <span class="text-xs text-slate-400 font-semibold">GAMING GRADE:</span>
+        <span class="px-3 py-1 rounded-full text-xs font-black tracking-wider border ${gradeColors[gaming.overall_grade] || 'bg-slate-700 text-white'}">
+          GRADE ${gaming.overall_grade} • ${gaming.overall_status}
+        </span>
+      </div>
+    `;
+  }
+
+  const riskColor = gaming.anti_cheat_risk === 'LOW' ? 'text-emerald-400' : (gaming.anti_cheat_risk === 'MODERATE' ? 'text-amber-400' : 'text-rose-400');
+  const natColor = (gaming.nat_suitability && (gaming.nat_suitability.includes('Full-Cone') || gaming.nat_suitability.includes('Open'))) ? 'text-emerald-400' : 'text-amber-400';
+
+  const gamesHtml = (gaming.games || []).map(g => {
+    const statusBadge = g.status === 'EXCELLENT' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
+      (g.status === 'COMPATIBLE' ? 'bg-teal-500/10 text-teal-400 border border-teal-500/20' :
+      (g.status === 'RESTRICTED' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'));
+
+    return `
+      <div class="p-3.5 rounded-xl bg-dark-900 border border-slate-800 hover:border-slate-700 transition-all flex flex-col justify-between">
+        <div>
+          <div class="flex items-start justify-between gap-2 mb-1.5">
+            <div>
+              <h5 class="text-xs font-bold text-white leading-tight">${g.game_name}</h5>
+              <span class="text-[10px] text-slate-400">${g.category}</span>
+            </div>
+            <span class="px-2 py-0.5 rounded text-[10px] font-bold ${statusBadge}">
+              ${g.status}
+            </span>
+          </div>
+          <div class="text-[11px] text-slate-300 my-2 leading-relaxed">${g.notes}</div>
+        </div>
+        <div class="pt-2 border-t border-slate-800/80 space-y-1 text-[10px] font-mono text-slate-400">
+          <div class="flex items-center justify-between">
+            <span>Ping / RTT:</span>
+            <span class="font-bold text-slate-200">${g.latency_ms > 0 ? g.latency_ms + 'ms' : 'Timeout'}</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span>Anti-Cheat:</span>
+            <span class="text-slate-300">${g.anti_cheat_engine}</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span>Ports:</span>
+            <span class="text-cyan-300">${g.port_requirements}</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  body.innerHTML = `
+    <!-- Summary Metrics -->
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3.5 rounded-xl bg-dark-900/60 border border-slate-700/60">
+      <div>
+        <span class="text-[10px] text-slate-400 uppercase font-semibold">Anti-Cheat Fraud Risk</span>
+        <div class="text-xs font-bold ${riskColor} mt-0.5">${gaming.anti_cheat_risk} RISK</div>
+      </div>
+      <div>
+        <span class="text-[10px] text-slate-400 uppercase font-semibold">NAT Gaming Suitability</span>
+        <div class="text-xs font-bold ${natColor} mt-0.5">${gaming.nat_suitability}</div>
+      </div>
+      <div>
+        <span class="text-[10px] text-slate-400 uppercase font-semibold">IP Classification</span>
+        <div class="text-xs font-bold text-slate-200 mt-0.5">${gaming.isp_classification}</div>
+      </div>
+    </div>
+
+    <!-- Games Matrix -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      ${gamesHtml}
+    </div>
+
+    <!-- Recommendations -->
+    ${(gaming.recommendations && gaming.recommendations.length > 0) ? `
+      <div class="p-3.5 rounded-xl bg-dark-900/80 border border-slate-800 text-xs text-slate-300 space-y-1.5">
+        <div class="font-bold text-white flex items-center gap-1.5">
+          <i data-lucide="check-circle-2" class="w-4 h-4 text-emerald-400"></i> WISP Engineering Recommendations
+        </div>
+        <ul class="list-disc list-inside space-y-1 text-slate-400 pl-1">
+          ${gaming.recommendations.map(r => `<li>${r}</li>`).join("")}
+        </ul>
+      </div>
+    ` : ''}
+  `;
+
   if (window.lucide) lucide.createIcons();
 }
 
@@ -785,9 +905,10 @@ async function loadIPIntelProviders() {
             </div>
             <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
               p.provider_type === 'dnsbl' ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20' :
-              (p.provider_type === 'abuse_api' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' : 'bg-purple-500/10 text-purple-400 border border-purple-500/20')
+              (p.provider_type === 'abuse_api' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
+              (p.provider_type === 'gaming_intel' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-purple-500/10 text-purple-400 border border-purple-500/20'))
             }">
-              ${p.provider_type}
+              ${p.provider_type === 'gaming_intel' ? 'GAMING & ANTI-CHEAT' : p.provider_type}
             </span>
           </div>
 

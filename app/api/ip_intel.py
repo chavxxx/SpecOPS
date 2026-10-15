@@ -26,11 +26,13 @@ from app.models.ip_intel_schemas import (
     IPIntelOverviewStats,
     IPInvestigationCreate,
     IPInvestigationItem,
-    ReputationStatus
+    ReputationStatus,
+    GamingCompatibilitySummary
 )
 from app.services.ip_intel.base import is_valid_ip, get_ip_version, is_private_or_special_ip
 from app.services.ip_intel.scanner import get_ip_intel_scanner
 from app.services.ip_intel.cgnat_correlation import CGNATReputationCorrelator
+from app.services.ip_intel.gaming_provider import GamingCompatibilityProvider
 
 router = APIRouter(prefix="/ip-intelligence", tags=["IP Intelligence & Reputation"])
 
@@ -332,6 +334,26 @@ async def delete_inventory_ip(
 # ---------------------------------------------------------------------------
 # 5. IP DETAILS, HISTORY & CORRELATIONS
 # ---------------------------------------------------------------------------
+@router.get("/ip/{ip_address}/gaming", response_model=GamingCompatibilitySummary)
+async def get_ip_gaming_compatibility(
+    ip_address: str,
+    user: UserResponse = Depends(require_read_or_admin)
+):
+    """
+    Evaluates online multiplayer gaming and anti-cheat compatibility for Call of Duty: Mobile,
+    Mobile Legends (MLBB), Valorant, Steam, Roblox, PUBG, and Console networks.
+    """
+    clean_ip = ip_address.strip()
+    if not is_valid_ip(clean_ip):
+        raise HTTPException(status_code=400, detail="Invalid IP address format.")
+
+    provider = GamingCompatibilityProvider({
+        "provider_id": "gaming_compat",
+        "provider_name": "Online Gaming & Anti-Cheat Engine",
+        "provider_type": "gaming_intel"
+    })
+    return await provider.evaluate_gaming_compatibility(clean_ip)
+
 @router.get("/ip/{ip_address}/history")
 async def get_ip_history(
     ip_address: str,

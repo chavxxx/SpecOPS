@@ -196,11 +196,6 @@ class IPIntelDatabaseMixin:
         self._seed_default_inventory(cursor, conn)
 
     def _seed_default_providers(self, cursor: sqlite3.Cursor, conn: sqlite3.Connection):
-        cursor.execute("SELECT COUNT(*) FROM ip_intel_providers;")
-        count = cursor.fetchone()[0]
-        if count > 0:
-            return
-
         providers = [
             (
                 "spamhaus_zen",
@@ -369,11 +364,32 @@ class IPIntelDatabaseMixin:
                 None,
                 "https://tools.ietf.org/html/rfc1912",
                 "Performs Forward-Confirmed Reverse DNS (FCrDNS) validation to detect missing PTR or generic dynamic naming patterns."
+            ),
+            (
+                "gaming_compat",
+                "Online Gaming & Anti-Cheat Engine",
+                "gaming_intel",
+                1,
+                "https://wispnet.ph/api/gaming-compatibility",
+                None,
+                "none",
+                None,
+                5.0,
+                60,
+                5,
+                1800,
+                3600,
+                json.dumps(["ipv4", "ipv6"]),
+                None,
+                None,
+                None,
+                "https://wispnet.ph/docs/gaming-cgnat-optimization",
+                "Multiplayer gaming health verifier for Call of Duty: Mobile (Garena/Activision), MLBB, Valorant Vanguard, Steam, Roblox, and PUBG."
             )
         ]
 
         cursor.executemany("""
-            INSERT INTO ip_intel_providers (
+            INSERT OR IGNORE INTO ip_intel_providers (
                 provider_id, provider_name, provider_type, enabled, api_endpoint, api_key,
                 auth_method, dns_zone, timeout_seconds, rate_limit_rpm, max_concurrent,
                 cache_duration_positive_sec, cache_duration_negative_sec, supported_indicators,
