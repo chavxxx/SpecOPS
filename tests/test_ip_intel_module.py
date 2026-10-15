@@ -27,6 +27,8 @@ from app.services.ip_intel.abuseipdb_provider import AbuseIPDBProvider
 from app.services.ip_intel.virustotal_provider import VirusTotalProvider
 from app.services.ip_intel.greynoise_provider import GreyNoiseProvider
 from app.services.ip_intel.rdns_provider import ReverseDNSProvider
+from app.services.ip_intel.gaming_provider import GamingCompatibilityProvider
+from app.models.ip_intel_schemas import GameCompatibilityStatus
 from app.services.ip_intel.scoring_engine import ReputationScoringEngine
 from app.services.ip_intel.cgnat_correlation import CGNATReputationCorrelator
 from app.services.ip_intel.scanner import get_ip_intel_scanner
@@ -202,6 +204,64 @@ async def test_rdns_fcrdns_provider(monkeypatch):
     res_valid = await prov.check_ip("157.119.69.129")
     assert res_valid.is_listed is False
     assert res_valid.risk_status == ReputationStatus.CLEAN
+
+# ---------------------------------------------------------------------------
+# 4b. Online Gaming & Anti-Cheat Provider Grounded Telemetry Tests
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_gaming_compatibility_provider_states(monkeypatch):
+    prov = GamingCompatibilityProvider({
+        "provider_id": "gaming_compat",
+        "provider_name": "Online Gaming & Anti-Cheat Engine",
+        "provider_type": "gaming_intel"
+    })
+
+    # Case A: Clean public IP (157.119.69.129) with NOERROR DNS
+    async def mock_clean_dns(qname, qtype_str, *args, **kwargs):
+        if qtype_str == "PTR":
+            return DNSQueryResult(qname, "PTR", "NOERROR", 0, ["dynamic-157-119-69-129.wispnet.ph"], 15.0, "8.8.8.8")
+        elif "zen.spamhaus.org" in qname:
+            return DNSQueryResult(qname, "A", "NXDOMAIN", 3, [], 12.0, "8.8.8.8")
+        else:
+            return DNSQueryResult(qname, "A", "NOERROR", 0, ["104.16.120.50"], 25.0, "8.8.8.8")
+
+    monkeypatch.setattr("app.services.ip_intel.gaming_provider.async_query_dns", mock_clean_dns)
+    res_clean = await prov.check_ip("157.119.69.129")
+    assert res_clean.is_listed is False
+    assert res_clean.risk_status == ReputationStatus.CLEAN
+    assert res_clean.listing_category == ListingCategory.NONE
+    assert res_clean.source_score >= 85.0
+    summary_clean = res_clean.raw_reference
+    assert summary_clean["overall_grade"] in ("A+", "A")
+    assert summary_clean["anti_cheat_risk"] == "LOW"
+    assert "Full-Cone" in summary_clean["nat_suitability"] or "Safe for Gaming" in summary_clean["nat_suitability"]
+    # All game services must be COMPATIBLE or EXCELLENT with NO fake WAF or ReadTimeout
+    for g in summary_clean["games"]:
+        assert g["status"] in ("EXCELLENT", "COMPATIBLE")
+        assert "WAF challenge active" not in g["notes"]
+        assert "ReadTimeout" not in g["notes"]
+        assert g["latency_ms"] > 0
+
+    # Case B: Botnet-flagged IP (listed on Spamhaus XBL 127.0.0.4)
+    async def mock_botnet_dns(qname, qtype_str, *args, **kwargs):
+        if "zen.spamhaus.org" in qname:
+            return DNSQueryResult(qname, "A", "NOERROR", 0, ["127.0.0.4"], 15.0, "8.8.8.8")
+        return DNSQueryResult(qname, "A", "NOERROR", 0, ["1.2.3.4"], 20.0, "8.8.8.8")
+
+    monkeypatch.setattr("app.services.ip_intel.gaming_provider.async_query_dns", mock_botnet_dns)
+    res_botnet = await prov.check_ip("103.200.1.1")
+    assert res_botnet.is_listed is True
+    assert res_botnet.risk_status == ReputationStatus.HIGH_RISK
+    summary_botnet = res_botnet.raw_reference
+    assert summary_botnet["overall_grade"] == "F"
+    assert summary_botnet["anti_cheat_risk"] == "HIGH"
+
+    # Case C: Private / RFC1918 Address (192.168.1.1)
+    res_priv = await prov.check_ip("192.168.1.1")
+    assert res_priv.is_listed is True
+    assert res_priv.risk_status == ReputationStatus.HIGH_RISK
+    assert res_priv.raw_reference["overall_grade"] == "F"
+    assert res_priv.raw_reference["anti_cheat_risk"] == "CRITICAL"
 
 # ---------------------------------------------------------------------------
 # 5. Reputation Scoring Engine Rules Tests

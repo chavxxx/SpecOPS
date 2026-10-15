@@ -209,6 +209,26 @@ class IPIntelDatabaseMixin:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_intel_hist_ip ON ip_intel_history (ip_address, timestamp);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_intel_scan_items_scan ON ip_intel_scan_items (scan_id, status);")
 
+        # Purge stale/false gaming observations where is_listed was mistakenly flagged
+        cursor.execute("DELETE FROM ip_intel_observations WHERE provider_id = 'gaming_compat' AND is_listed = 1;")
+        # Recalculate inventory active listings to ensure clean IPs are not marked as listed
+        cursor.execute("""
+            UPDATE ip_intel_inventory
+            SET active_listing_count = (
+                SELECT COUNT(DISTINCT provider_id)
+                FROM ip_intel_observations
+                WHERE ip_intel_observations.ip_address = ip_intel_inventory.ip_address
+                  AND ip_intel_observations.is_listed = 1
+                  AND ip_intel_observations.provider_id != 'gaming_compat'
+            )
+            WHERE active_listing_count > 0;
+        """)
+        cursor.execute("""
+            UPDATE ip_intel_inventory
+            SET current_reputation_status = 'CLEAN', risk_score = 0.0
+            WHERE active_listing_count = 0 AND current_reputation_status IN ('LISTED', 'HIGH_RISK', 'SUSPICIOUS');
+        """)
+
         conn.commit()
 
         # Seed default providers if table empty
