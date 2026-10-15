@@ -189,3 +189,39 @@ async def test_live_router_test_connection_endpoint(test_db):
         assert "online" in data
         assert data["online"] is True
         assert "latency_ms" in data
+
+@pytest.mark.asyncio
+async def test_sync_fleet_all_methods_and_aliases(test_db):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        login_res = await client.post("/api/auth/login", json={
+            "username": "synchavxxx",
+            "password": "passworD1369"
+        })
+        assert login_res.status_code == 200
+        token = login_res.json()["token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Verify all sync routes accept both POST and GET and return 200 without 405
+        sync_endpoints = [
+            "/api/routers/sync-all",
+            "/api/routers/sync",
+            "/api/routers/fleet-sync",
+            "/api/routers/fleet/sync",
+            "/api/fleet/sync",
+            "/api/sync"
+        ]
+
+        for ep in sync_endpoints:
+            # POST
+            res_post = await client.post(ep, headers=headers)
+            assert res_post.status_code == 200, f"POST {ep} returned {res_post.status_code}: {res_post.text}"
+            data_post = res_post.json()
+            assert data_post["status"] == "success"
+
+            # GET
+            res_get = await client.get(ep, headers=headers)
+            assert res_get.status_code == 200, f"GET {ep} returned {res_get.status_code}: {res_get.text}"
+            data_get = res_get.json()
+            assert data_get["status"] == "success"
+

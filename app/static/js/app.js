@@ -693,7 +693,7 @@ async function syncEverything() {
 
   try {
     const authHeaders = typeof getAuthHeaders === 'function' ? getAuthHeaders() : {};
-    const res = await fetch('/api/routers/sync-all', {
+    let res = await fetch('/api/routers/sync-all', {
       method: 'POST',
       headers: {
         ...authHeaders,
@@ -701,6 +701,28 @@ async function syncEverything() {
       },
       credentials: 'include'
     });
+
+    if (res.status === 405 || res.status === 404) {
+      res = await fetch('/api/routers/sync', {
+        method: 'POST',
+        headers: {
+          ...authHeaders,
+          'Content-Type': 'application/json'
+        },
+        credentials: 'include'
+      });
+    }
+
+    if (res.status === 405 || res.status === 404) {
+      res = await fetch('/api/fleet/sync', {
+        method: 'POST',
+        headers: {
+          ...authHeaders,
+          'Content-Type': 'application/json'
+        },
+        credentials: 'include'
+      });
+    }
 
     if (res.status === 401) {
       showToast('Authentication required to sync fleet.', 'error');

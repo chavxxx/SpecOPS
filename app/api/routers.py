@@ -34,17 +34,6 @@ async def list_routers(
     """List all onboarded MikroTik routers with status and hardware telemetry"""
     return db.get_routers(role=role)
 
-@router.get("/{router_id}", response_model=Dict[str, Any])
-async def get_router(
-    router_id: str,
-    db: DatabaseManager = Depends(get_db),
-    user: UserResponse = Depends(require_read_or_admin)
-):
-    """Retrieve single router details (passwords always masked)"""
-    r = db.get_router(router_id, include_password=False)
-    if not r:
-        raise HTTPException(status_code=404, detail=f"Router '{router_id}' not found.")
-    return r
 
 class RouterLiveTestRequest(BaseModel):
     host: str
@@ -77,6 +66,202 @@ async def test_live_router_connection(
         timeout=4.0
     )
     return client.test_connection()
+
+@router.api_route("/sync-all", methods=["GET", "POST"], response_model=Dict[str, Any])
+@router.api_route("/sync", methods=["GET", "POST"], response_model=Dict[str, Any])
+@router.api_route("/fleet-sync", methods=["GET", "POST"], response_model=Dict[str, Any])
+@router.api_route("/fleet/sync", methods=["GET", "POST"], response_model=Dict[str, Any])
+async def sync_all_routers(
+    db: DatabaseManager = Depends(get_db),
+    user: UserResponse = Depends(require_read_or_admin)
+):
+    """
+    Synchronize the entire fleet of routers:
+    - Tests connectivity and fetches live CPU, model, and RouterOS version
+    - Harvests active PPPoE/IP subscriber sessions from Access Concentrators
+    - Audits active CGNAT rules from Core Gateways
+    - Updates integration health status
+    """
+    routers = db.get_routers()
+    if not routers:
+        return {
+            "status": "success",
+            "total_routers": 0,
+            "online_routers": 0,
+            "offline_routers": 0,
+            "sessions_harvested": 0,
+            "message": "No routers onboarded yet. Click '+ Onboard Router' to add your running MikroTik routers.",
+            "results": []
+        }
+
+    results = []
+    online_count = 0
+    offline_count = 0
+    total_sessions = 0
+
+    from app.services.routeros_security import RouterOSSecurityAdapter
+
+    for r in routers:
+        r_id = r["id"]
+        r_name = r["name"]
+        r_role = r.get("role", "core")
+        enabled = bool(r.get("enabled", 1))
+
+        if not enabled:
+            results.append({
+                "id": r_id,
+                "name": r_name,
+                "role": r_role,
+                "online": False,
+                "status": "disabled",
+                "sessions": 0,
+                "message": "Router is disabled"
+            })
+            continue
+
+        # Test connectivity
+        t0 = time.time()
+        router_online = False
+        harvested_for_this = 0
+        err_msg = None
+
+        try:
+            client = MikroTikAPIClient(
+                host=r["host"],
+                port=r["port"],
+                username=r["username"],
+                password=r["password"],
+                use_ssl=bool(r.get("use_ssl")),
+                use_rest=bool(r.get("use_rest")),
+                timeout=4.0
+            )
+            test_res = client.test_connection()
+            latency_ms = test_res.get("latency_ms", round((time.time() - t0) * 1000, 2))
+
+            if test_res.get("online"):
+                model = test_res.get("board_name") or "MikroTik Router"
+                ros_version = test_res.get("routeros_version") or "v7"
+                cpu_load = test_res.get("cpu_load", 0)
+                uptime = test_res.get("uptime") or "unknown"
+
+                db.update_router_telemetry(
+                    router_id=r_id,
+                    status="online",
+                    model=model,
+                    ros_version=ros_version,
+                    cpu_load=cpu_load,
+                    uptime=uptime,
+                    last_error=None
+                )
+                router_online = True
+                online_count += 1
+
+                # Role-specific harvest
+                if r_role == "ac":
+                    try:
+                        adapter = RouterOSSecurityAdapter(
+                            ac_host=r["host"],
+                            ac_port=r["port"],
+                            ac_user=r["username"],
+                            ac_pass=r["password"],
+                            ac_use_ssl=bool(r.get("use_ssl")),
+                            ac_use_rest=bool(r.get("use_rest")),
+                            db=db
+                        )
+                        sessions = adapter.harvest_active_pppoe_sessions(access_concentrator_id=r_id)
+                        harvested_for_this = len(sessions)
+                        total_sessions += harvested_for_this
+                    except Exception as he:
+                        logger.warning(f"Session harvest error on AC {r_name}: {he}")
+
+                elif r_role == "core":
+                    try:
+                        adapter = RouterOSSecurityAdapter(
+                            core_host=r["host"],
+                            core_port=r["port"],
+                            core_user=r["username"],
+                            core_pass=r["password"],
+                            core_use_ssl=bool(r.get("use_ssl")),
+                            core_use_rest=bool(r.get("use_rest")),
+                            db=db
+                        )
+                        adapter.inspect_core_nat_rules()
+                    except Exception as ce:
+                        logger.warning(f"NAT audit error on Core {r_name}: {ce}")
+
+                results.append({
+                    "id": r_id,
+                    "name": r_name,
+                    "role": r_role,
+                    "online": True,
+                    "model": model,
+                    "ros_version": ros_version,
+                    "cpu_load": cpu_load,
+                    "uptime": uptime,
+                    "latency_ms": latency_ms,
+                    "sessions": harvested_for_this,
+                    "status": "online"
+                })
+            else:
+                err_msg = test_res.get("error_message") or "Host unreachable"
+                offline_count += 1
+                db.update_router_telemetry(
+                    router_id=r_id,
+                    status="offline",
+                    last_error=err_msg
+                )
+                results.append({
+                    "id": r_id,
+                    "name": r_name,
+                    "role": r_role,
+                    "online": False,
+                    "status": "offline",
+                    "sessions": 0,
+                    "error": err_msg,
+                    "latency_ms": latency_ms
+                })
+
+        except Exception as e:
+            err_msg = str(e)
+            offline_count += 1
+            db.update_router_telemetry(
+                router_id=r_id,
+                status="offline",
+                last_error=err_msg
+            )
+            results.append({
+                "id": r_id,
+                "name": r_name,
+                "role": r_role,
+                "online": False,
+                "error": err_msg,
+                "status": "offline",
+                "sessions": 0
+            })
+
+    # Record security audit log
+    db.log_audit_event(
+        operator_id=user.username,
+        action="fleet_sync",
+        target_type="routers",
+        outcome="success",
+        details={
+            "total": len(routers),
+            "online": online_count,
+            "offline": offline_count,
+            "sessions": total_sessions
+        }
+    )
+
+    return {
+        "status": "success",
+        "total_routers": len(routers),
+        "online_routers": online_count,
+        "offline_routers": offline_count,
+        "sessions_harvested": total_sessions,
+        "message": f"Fleet sync complete: {online_count}/{len(routers)} routers online, {total_sessions} active sessions synced.",
+        "results": results
+    }
 
 @router.post("", response_model=Dict[str, Any], status_code=201)
 async def onboard_router(
@@ -154,6 +339,18 @@ async def onboard_router(
         "router_id": router_id,
         "message": f"Router '{req.name}' successfully onboarded with role '{req.role}'."
     }
+
+@router.get("/{router_id}", response_model=Dict[str, Any])
+async def get_router(
+    router_id: str,
+    db: DatabaseManager = Depends(get_db),
+    user: UserResponse = Depends(require_read_or_admin)
+):
+    """Retrieve single router details (passwords always masked)"""
+    r = db.get_router(router_id, include_password=False)
+    if not r:
+        raise HTTPException(status_code=404, detail=f"Router '{router_id}' not found.")
+    return r
 
 @router.put("/{router_id}", response_model=Dict[str, Any])
 async def update_router(
@@ -398,195 +595,3 @@ async def harvest_from_router(
             "message": f"Router '{r['name']}' ({role}) telemetry refreshed."
         }
 
-@router.post("/sync-all", response_model=Dict[str, Any])
-async def sync_all_routers(
-    db: DatabaseManager = Depends(get_db),
-    user: UserResponse = Depends(require_read_or_admin)
-):
-    """
-    Synchronize the entire fleet of routers:
-    - Tests connectivity and fetches live CPU, model, and RouterOS version
-    - Harvests active PPPoE/IP subscriber sessions from Access Concentrators
-    - Audits active CGNAT rules from Core Gateways
-    - Updates integration health status
-    """
-    routers = db.get_routers()
-    if not routers:
-        return {
-            "status": "success",
-            "total_routers": 0,
-            "online_routers": 0,
-            "offline_routers": 0,
-            "sessions_harvested": 0,
-            "message": "No routers onboarded yet. Click '+ Onboard Router' to add your running MikroTik routers.",
-            "results": []
-        }
-
-    results = []
-    online_count = 0
-    offline_count = 0
-    total_sessions = 0
-
-    from app.services.routeros_security import RouterOSSecurityAdapter
-
-    for r in routers:
-        r_id = r["id"]
-        r_name = r["name"]
-        r_role = r.get("role", "core")
-        enabled = bool(r.get("enabled", 1))
-
-        if not enabled:
-            results.append({
-                "id": r_id,
-                "name": r_name,
-                "role": r_role,
-                "online": False,
-                "status": "disabled",
-                "sessions": 0,
-                "message": "Router is disabled"
-            })
-            continue
-
-        # Test connectivity
-        t0 = time.time()
-        router_online = False
-        harvested_for_this = 0
-        err_msg = None
-
-        try:
-            client = MikroTikAPIClient(
-                host=r["host"],
-                port=r["port"],
-                username=r["username"],
-                password=r["password"],
-                use_ssl=bool(r.get("use_ssl")),
-                use_rest=bool(r.get("use_rest")),
-                timeout=4.0
-            )
-            test_res = client.test_connection()
-            latency_ms = test_res.get("latency_ms", round((time.time() - t0) * 1000, 2))
-
-            if test_res.get("online"):
-                model = test_res.get("board_name") or "MikroTik Router"
-                ros_version = test_res.get("routeros_version") or "v7"
-                cpu_load = test_res.get("cpu_load", 0)
-                uptime = test_res.get("uptime") or "unknown"
-
-                db.update_router_telemetry(
-                    router_id=r_id,
-                    status="online",
-                    model=model,
-                    ros_version=ros_version,
-                    cpu_load=cpu_load,
-                    uptime=uptime,
-                    last_error=None
-                )
-                router_online = True
-                online_count += 1
-
-                # Role-specific harvest
-                if r_role == "ac":
-                    try:
-                        adapter = RouterOSSecurityAdapter(
-                            ac_host=r["host"],
-                            ac_port=r["port"],
-                            ac_user=r["username"],
-                            ac_pass=r["password"],
-                            ac_use_ssl=bool(r.get("use_ssl")),
-                            ac_use_rest=bool(r.get("use_rest")),
-                            db=db
-                        )
-                        sessions = adapter.harvest_active_pppoe_sessions(access_concentrator_id=r_id)
-                        harvested_for_this = len(sessions)
-                        total_sessions += harvested_for_this
-                    except Exception as he:
-                        logger.warning(f"Session harvest error on AC {r_name}: {he}")
-
-                elif r_role == "core":
-                    try:
-                        adapter = RouterOSSecurityAdapter(
-                            core_host=r["host"],
-                            core_port=r["port"],
-                            core_user=r["username"],
-                            core_pass=r["password"],
-                            core_use_ssl=bool(r.get("use_ssl")),
-                            core_use_rest=bool(r.get("use_rest")),
-                            db=db
-                        )
-                        adapter.inspect_core_nat_rules()
-                    except Exception as ce:
-                        logger.warning(f"NAT audit error on Core {r_name}: {ce}")
-
-                results.append({
-                    "id": r_id,
-                    "name": r_name,
-                    "role": r_role,
-                    "online": True,
-                    "model": model,
-                    "ros_version": ros_version,
-                    "cpu_load": cpu_load,
-                    "uptime": uptime,
-                    "latency_ms": latency_ms,
-                    "sessions": harvested_for_this,
-                    "status": "online"
-                })
-            else:
-                err_msg = test_res.get("error_message") or "Host unreachable"
-                offline_count += 1
-                db.update_router_telemetry(
-                    router_id=r_id,
-                    status="offline",
-                    last_error=err_msg
-                )
-                results.append({
-                    "id": r_id,
-                    "name": r_name,
-                    "role": r_role,
-                    "online": False,
-                    "status": "offline",
-                    "sessions": 0,
-                    "error": err_msg,
-                    "latency_ms": latency_ms
-                })
-
-        except Exception as e:
-            err_msg = str(e)
-            offline_count += 1
-            db.update_router_telemetry(
-                router_id=r_id,
-                status="offline",
-                last_error=err_msg
-            )
-            results.append({
-                "id": r_id,
-                "name": r_name,
-                "role": r_role,
-                "online": False,
-                "error": err_msg,
-                "status": "offline",
-                "sessions": 0
-            })
-
-    # Record security audit log
-    db.log_audit_event(
-        operator_id=user.username,
-        action="fleet_sync",
-        target_type="routers",
-        outcome="success",
-        details={
-            "total": len(routers),
-            "online": online_count,
-            "offline": offline_count,
-            "sessions": total_sessions
-        }
-    )
-
-    return {
-        "status": "success",
-        "total_routers": len(routers),
-        "online_routers": online_count,
-        "offline_routers": offline_count,
-        "sessions_harvested": total_sessions,
-        "message": f"Fleet sync complete: {online_count}/{len(routers)} routers online, {total_sessions} active sessions synced.",
-        "results": results
-    }

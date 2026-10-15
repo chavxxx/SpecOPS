@@ -60,4 +60,21 @@ api_router.include_router(ip_intel_router)
 # System & GitHub Updates
 api_router.include_router(system_router)
 
+from fastapi import Depends
+from app.database.db import get_db, DatabaseManager
+from app.api.auth import require_read_or_admin
+from app.models.schemas import UserResponse
+
+# Global Fleet Sync Aliases (supporting GET and POST)
+@api_router.api_route("/fleet/sync", methods=["GET", "POST"], tags=["Router Onboarding & Hardware Management"])
+@api_router.api_route("/fleet-sync", methods=["GET", "POST"], tags=["Router Onboarding & Hardware Management"])
+@api_router.api_route("/sync", methods=["GET", "POST"], tags=["Router Onboarding & Hardware Management"])
+async def direct_fleet_sync(
+    db: DatabaseManager = Depends(get_db),
+    user: UserResponse = Depends(require_read_or_admin)
+):
+    from app.api.routers import sync_all_routers
+    return await sync_all_routers(db=db, user=user)
+
 __all__ = ["api_router"]
+
