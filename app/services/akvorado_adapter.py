@@ -398,7 +398,7 @@ class AkvoradoAdapter:
         now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         self.purge_simulated_flows()
 
-        routers = self.db.get_routers()
+        routers = self.db.get_routers(include_password=True)
         total_ingested = 0
 
         # Build subscriber IP cache
