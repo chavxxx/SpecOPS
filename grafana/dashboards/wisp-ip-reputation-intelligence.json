@@ -1,0 +1,242 @@
+{
+  "title": "WISPnet - IP Reputation & Blacklist Intelligence",
+  "uid": "wisp-ip-reputation-intelligence",
+  "tags": [
+    "wispnet",
+    "ip-intel",
+    "dnsbl",
+    "reputation",
+    "abuse",
+    "cgnat"
+  ],
+  "timezone": "Asia/Manila",
+  "refresh": "15s",
+  "schemaVersion": 38,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Reputation Status Distribution",
+      "type": "piechart",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "opensearch",
+        "uid": "WISPnet-OpenSearch"
+      },
+      "targets": [
+        {
+          "query": "*",
+          "metrics": [
+            {
+              "type": "count",
+              "id": "1"
+            }
+          ],
+          "bucketAggs": [
+            {
+              "type": "terms",
+              "id": "2",
+              "field": "risk_status"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Active Listings by Provider",
+      "type": "barchart",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "datasource": {
+        "type": "opensearch",
+        "uid": "WISPnet-OpenSearch"
+      },
+      "targets": [
+        {
+          "query": "is_listed: true",
+          "metrics": [
+            {
+              "type": "count",
+              "id": "1"
+            }
+          ],
+          "bucketAggs": [
+            {
+              "type": "terms",
+              "id": "2",
+              "field": "provider_name"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "New Blacklist Listings Over Time",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "datasource": {
+        "type": "opensearch",
+        "uid": "WISPnet-OpenSearch"
+      },
+      "targets": [
+        {
+          "query": "is_listed: true",
+          "metrics": [
+            {
+              "type": "count",
+              "id": "1"
+            }
+          ],
+          "bucketAggs": [
+            {
+              "type": "date_histogram",
+              "id": "2",
+              "field": "check_timestamp"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Provider Response Latencies (ms)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "datasource": {
+        "type": "opensearch",
+        "uid": "WISPnet-OpenSearch"
+      },
+      "targets": [
+        {
+          "query": "*",
+          "metrics": [
+            {
+              "type": "avg",
+              "id": "1",
+              "field": "duration_ms"
+            }
+          ],
+          "bucketAggs": [
+            {
+              "type": "date_histogram",
+              "id": "2",
+              "field": "check_timestamp"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Top Flagged Public IPs & Active Listings",
+      "type": "table",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "opensearch",
+        "uid": "WISPnet-OpenSearch"
+      },
+      "targets": [
+        {
+          "query": "is_listed: true",
+          "metrics": [
+            {
+              "type": "count",
+              "id": "1"
+            }
+          ],
+          "bucketAggs": [
+            {
+              "type": "terms",
+              "id": "2",
+              "field": "ip_address"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Listings by Category",
+      "type": "piechart",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "datasource": {
+        "type": "opensearch",
+        "uid": "WISPnet-OpenSearch"
+      },
+      "targets": [
+        {
+          "query": "is_listed: true",
+          "metrics": [
+            {
+              "type": "count",
+              "id": "1"
+            }
+          ],
+          "bucketAggs": [
+            {
+              "type": "terms",
+              "id": "2",
+              "field": "listing_category"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Suricata Security Alerts for Flagged Addresses",
+      "type": "table",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "datasource": {
+        "type": "opensearch",
+        "uid": "WISPnet-OpenSearch"
+      },
+      "targets": [
+        {
+          "query": "*",
+          "metrics": [
+            {
+              "type": "raw_document",
+              "id": "1"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

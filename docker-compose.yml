@@ -1,0 +1,155 @@
+version: '3.8'
+
+services:
+  # =========================================================================
+  # SyncHavxxx Security Monitoring & CGNAT Attribution Platform
+  # =========================================================================
+  synchavxxx-security:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: synchavxxx/security-platform:latest
+    container_name: synchavxxx-security
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - APP_ENV=production
+      - OPENSEARCH_URL=http://opensearch:9200
+      - OPENSEARCH_USER=${OPENSEARCH_USER:-admin}
+      - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD:-admin}
+      - OPENSEARCH_INDEX_PREFIX=wisp
+      - SURICATA_EVE_PATH=/var/log/suricata/eve.json
+      - AKVORADO_CLICKHOUSE_URL=${AKVORADO_CLICKHOUSE_URL:-http://akvorado-clickhouse:8123}
+      - AKVORADO_API_URL=${AKVORADO_API_URL:-http://akvorado-api:8080}
+      - CORE_ROUTER_HOST=${CORE_ROUTER_HOST:-10.0.0.1}
+      - CORE_ROUTER_PORT=${CORE_ROUTER_PORT:-8728}
+      - CORE_ROUTER_USER=${CORE_ROUTER_USER:-wisp-security}
+      - CORE_ROUTER_PASSWORD=${CORE_ROUTER_PASSWORD:-SecuredRouterOS7Password}
+      - PPPOE_AC_HOST=${PPPOE_AC_HOST:-10.0.0.2}
+      - PPPOE_AC_PORT=${PPPOE_AC_PORT:-8728}
+      - PPPOE_AC_USER=${PPPOE_AC_USER:-wisp-security}
+      - PPPOE_AC_PASSWORD=${PPPOE_AC_PASSWORD:-SecuredRouterOS7Password}
+    volumes:
+      - synchavxxx-data:/app/data
+      - synchavxxx-backups:/app/backups
+      - suricata-logs:/var/log/suricata:ro
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    networks:
+      - wisp-sec-net
+
+  # =========================================================================
+  # OpenSearch (SIEM Storage, Alert Indexing & Deep Analytics)
+  # =========================================================================
+  opensearch:
+    image: opensearchproject/opensearch:2.18.0
+    container_name: wisp-opensearch
+    restart: unless-stopped
+    environment:
+      - cluster.name=wisp-security-cluster
+      - node.name=wisp-opensearch-node1
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms2g -Xmx2g"
+      - plugins.security.disabled=true  # Configurable: set to false in TLS enterprise deployments
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    ports:
+      - "9200:9200"
+      - "9600:9600"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cat/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    networks:
+      - wisp-sec-net
+
+  # =========================================================================
+  # OpenSearch Dashboards (Security Investigation & Query Console)
+  # =========================================================================
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.18.0
+    container_name: wisp-opensearch-dashboards
+    restart: unless-stopped
+    ports:
+      - "5601:5601"
+    environment:
+      - OPENSEARCH_HOSTS=["http://opensearch:9200"]
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    networks:
+      - wisp-sec-net
+
+  # =========================================================================
+  # Grafana (Unified Observability & Pre-provisioned Threat Dashboards)
+  # =========================================================================
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: wisp-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-opensearch-datasource,grafana-clock-panel
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/wisp-security-overview.json
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    networks:
+      - wisp-sec-net
+
+  # =========================================================================
+  # Optional Local Suricata Sensor Container (for labs/testing)
+  # In production, Suricata typically runs bare-metal on sensor TAP interfaces
+  # =========================================================================
+  suricata:
+    image: jasonish/suricata:7.0.3
+    container_name: wisp-suricata
+    restart: unless-stopped
+    profiles:
+      - sensor-mock
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - SYS_NICE
+      - NET_RAW
+    volumes:
+      - suricata-logs:/var/log/suricata
+    command: -i lo -v
+
+volumes:
+  synchavxxx-data:
+    driver: local
+  synchavxxx-backups:
+    driver: local
+  opensearch-data:
+    driver: local
+  grafana-data:
+    driver: local
+  suricata-logs:
+    driver: local
+
+networks:
+  wisp-sec-net:
+    driver: bridge

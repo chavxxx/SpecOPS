@@ -1,0 +1,75 @@
+{
+  "title": "WISPnet - Integration Pipeline Health",
+  "uid": "wisp-pipeline-health",
+  "tags": [
+    "wispnet",
+    "pipeline",
+    "health",
+    "opensearch"
+  ],
+  "timezone": "Asia/Manila",
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "panels": [
+    {
+      "id": 1,
+      "title": "OpenSearch Durable Queue Depth",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "WISPnet-API"
+      },
+      "targets": [
+        {
+          "url": "http://synchavxxx-app:8000/api/security/health"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Sensor Processing Lag (ms)",
+      "type": "gauge",
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 8,
+        "y": 0
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "WISPnet-API"
+      },
+      "targets": [
+        {
+          "url": "http://synchavxxx-app:8000/api/security/health"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Integrations Connectivity Status",
+      "type": "table",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "WISPnet-API"
+      },
+      "targets": [
+        {
+          "url": "http://synchavxxx-app:8000/api/security/health"
+        }
+      ]
+    }
+  ]
+}

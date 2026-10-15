@@ -1,0 +1,74 @@
+{
+  "title": "WISPnet - Suricata Alerts and Sensor Health",
+  "uid": "wisp-suricata-health",
+  "tags": [
+    "wispnet",
+    "suricata",
+    "health",
+    "ids"
+  ],
+  "timezone": "Asia/Manila",
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Suricata Ingestion Rate (Alerts/sec)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "opensearch",
+        "uid": "WISPnet-OpenSearch"
+      },
+      "targets": [
+        {
+          "query": "event_type:alert",
+          "metrics": [
+            {
+              "type": "count",
+              "id": "1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Alert Severity Distribution",
+      "type": "piechart",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "datasource": {
+        "type": "opensearch",
+        "uid": "WISPnet-OpenSearch"
+      },
+      "targets": [
+        {
+          "query": "*",
+          "metrics": [
+            {
+              "type": "count",
+              "id": "1"
+            }
+          ],
+          "bucketAggs": [
+            {
+              "type": "terms",
+              "id": "2",
+              "field": "severity"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

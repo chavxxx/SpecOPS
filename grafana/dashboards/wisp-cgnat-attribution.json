@@ -1,0 +1,74 @@
+{
+  "title": "WISPnet - CGNAT Attribution and Abuse Investigation",
+  "uid": "wisp-cgnat-attribution",
+  "tags": [
+    "wispnet",
+    "cgnat",
+    "attribution",
+    "forensics"
+  ],
+  "timezone": "Asia/Manila",
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Abuse Query Timeline",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "opensearch",
+        "uid": "WISPnet-OpenSearch"
+      },
+      "targets": [
+        {
+          "query": "*",
+          "metrics": [
+            {
+              "type": "count",
+              "id": "1"
+            }
+          ],
+          "bucketAggs": [
+            {
+              "type": "date_histogram",
+              "id": "2",
+              "field": "event_timestamp"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Subscriber Attribution Event Log",
+      "type": "table",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "opensearch",
+        "uid": "WISPnet-OpenSearch"
+      },
+      "targets": [
+        {
+          "query": "*",
+          "metrics": [
+            {
+              "type": "raw_document",
+              "id": "1"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

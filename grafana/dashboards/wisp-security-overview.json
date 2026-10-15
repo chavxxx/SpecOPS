@@ -1,0 +1,76 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "id": 1,
+      "title": "Active Critical Incidents",
+      "type": "stat",
+      "datasource": {"type": "opensearch", "uid": "WISPnet-OpenSearch"},
+      "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "targets": [{"query": "severity:critical AND status:(new OR investigating)", "metrics": [{"type": "count", "id": "1"}]}]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "id": 2,
+      "title": "Active High Incidents",
+      "type": "stat",
+      "datasource": {"type": "opensearch", "uid": "WISPnet-OpenSearch"},
+      "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "targets": [{"query": "severity:high AND status:(new OR investigating)", "metrics": [{"type": "count", "id": "1"}]}]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "id": 3,
+      "title": "Verified Attributions (24h)",
+      "type": "stat",
+      "datasource": {"type": "opensearch", "uid": "WISPnet-OpenSearch"},
+      "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "targets": [{"query": "attribution_status:verified", "metrics": [{"type": "count", "id": "1"}]}]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "id": 4,
+      "title": "Unresolved Post-NAT Events",
+      "type": "stat",
+      "datasource": {"type": "opensearch", "uid": "WISPnet-OpenSearch"},
+      "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "targets": [{"query": "attribution_status:unresolved", "metrics": [{"type": "count", "id": "1"}]}]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {"h": 8, "w": 14, "x": 0, "y": 4},
+      "id": 5,
+      "title": "Security Events Over Time by Category",
+      "type": "timeseries",
+      "datasource": {"type": "opensearch", "uid": "WISPnet-OpenSearch"},
+      "targets": [{"query": "*", "metrics": [{"type": "count", "id": "1"}], "bucketAggs": [{"type": "date_histogram", "id": "2", "field": "event_timestamp"}, {"type": "terms", "id": "3", "field": "category"}]}]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {"h": 8, "w": 10, "x": 14, "y": 4},
+      "id": 6,
+      "title": "Top Suspicious Subscriber CGNAT IPs",
+      "type": "table",
+      "datasource": {"type": "opensearch", "uid": "WISPnet-OpenSearch"},
+      "targets": [{"query": "subscriber_cgnat_ip:*", "metrics": [{"type": "count", "id": "1"}], "bucketAggs": [{"type": "terms", "id": "2", "field": "subscriber_cgnat_ip", "size": 10}]}]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "tags": ["wispnet", "security", "overview"],
+  "timezone": "Asia/Manila",
+  "title": "WISPnet - ISP Security Overview",
+  "uid": "wisp-sec-overview",
+  "version": 1
+}

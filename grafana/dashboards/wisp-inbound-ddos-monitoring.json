@@ -1,0 +1,75 @@
+{
+  "title": "WISPnet - Inbound DDoS Monitoring",
+  "uid": "wisp-inbound-ddos",
+  "tags": [
+    "wispnet",
+    "inbound",
+    "ddos",
+    "perimeter"
+  ],
+  "timezone": "Asia/Manila",
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Inbound Attack Volume (Packets / sec)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "opensearch",
+        "uid": "WISPnet-OpenSearch"
+      },
+      "targets": [
+        {
+          "query": "traffic_direction:inbound",
+          "metrics": [
+            {
+              "type": "sum",
+              "id": "1",
+              "field": "packets"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Top Targeted Public IPs",
+      "type": "table",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "datasource": {
+        "type": "opensearch",
+        "uid": "WISPnet-OpenSearch"
+      },
+      "targets": [
+        {
+          "query": "traffic_direction:inbound",
+          "metrics": [
+            {
+              "type": "count",
+              "id": "1"
+            }
+          ],
+          "bucketAggs": [
+            {
+              "type": "terms",
+              "id": "2",
+              "field": "destination_ip"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

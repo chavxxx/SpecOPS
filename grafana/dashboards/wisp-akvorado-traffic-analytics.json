@@ -1,0 +1,83 @@
+{
+  "title": "WISPnet - Akvorado Traffic Analytics",
+  "uid": "wisp-akvorado-traffic",
+  "tags": [
+    "wispnet",
+    "akvorado",
+    "netflow",
+    "bandwidth"
+  ],
+  "timezone": "Asia/Manila",
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Traffic Volume by Protocol",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 14,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "opensearch",
+        "uid": "WISPnet-OpenSearch"
+      },
+      "targets": [
+        {
+          "query": "*",
+          "metrics": [
+            {
+              "type": "sum",
+              "id": "1",
+              "field": "bytes"
+            }
+          ],
+          "bucketAggs": [
+            {
+              "type": "terms",
+              "id": "2",
+              "field": "protocol"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Top Subscriber Talkers (Bandwidth)",
+      "type": "table",
+      "gridPos": {
+        "h": 8,
+        "w": 10,
+        "x": 14,
+        "y": 0
+      },
+      "datasource": {
+        "type": "opensearch",
+        "uid": "WISPnet-OpenSearch"
+      },
+      "targets": [
+        {
+          "query": "subscriber_cgnat_ip:*",
+          "metrics": [
+            {
+              "type": "sum",
+              "id": "1",
+              "field": "bytes"
+            }
+          ],
+          "bucketAggs": [
+            {
+              "type": "terms",
+              "id": "2",
+              "field": "subscriber_cgnat_ip"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

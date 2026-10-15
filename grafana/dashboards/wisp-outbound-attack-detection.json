@@ -1,0 +1,101 @@
+{
+  "title": "WISPnet - Outbound Attack Detection",
+  "uid": "wisp-outbound-attack",
+  "tags": [
+    "wispnet",
+    "outbound",
+    "ddos",
+    "scanning"
+  ],
+  "timezone": "Asia/Manila",
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Outbound Floods & High PPS Subscribers",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "opensearch",
+        "uid": "WISPnet-OpenSearch"
+      },
+      "targets": [
+        {
+          "query": "category:outbound_ddos",
+          "metrics": [
+            {
+              "type": "sum",
+              "id": "1",
+              "field": "packets"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Outbound Port Scans Detected",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "datasource": {
+        "type": "opensearch",
+        "uid": "WISPnet-OpenSearch"
+      },
+      "targets": [
+        {
+          "query": "category:port_scanning",
+          "metrics": [
+            {
+              "type": "count",
+              "id": "1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Top Outbound Attack Signatures",
+      "type": "table",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "opensearch",
+        "uid": "WISPnet-OpenSearch"
+      },
+      "targets": [
+        {
+          "query": "traffic_direction:outbound",
+          "metrics": [
+            {
+              "type": "count",
+              "id": "1"
+            }
+          ],
+          "bucketAggs": [
+            {
+              "type": "terms",
+              "id": "2",
+              "field": "signature_name.raw"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
