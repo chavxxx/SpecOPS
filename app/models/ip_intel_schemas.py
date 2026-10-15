@@ -270,3 +270,47 @@ class GamingCompatibilitySummary(BaseModel):
     isp_classification: str      # "Residential / Wireless ISP", "CGNAT Subscriber Pool", etc.
     games: List[GameServiceItem] = []
     recommendations: List[str] = []
+
+# ---------------------------------------------------------------------------
+# Autonomous IP Remediation & Delisting Agent Schemas
+# ---------------------------------------------------------------------------
+class RemediationJobStatus(str, Enum):
+    EVALUATING = "evaluating"
+    SANITIZING = "sanitizing"
+    DELISTING = "delisting"
+    MONITORING = "monitoring"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+class RemediationActionItem(BaseModel):
+    id: str
+    provider_id: str
+    provider_name: str
+    action_type: str            # web_portal, api_submit, geofeed_update, dns_ptr, firewall_rule
+    action_title: str
+    description: str
+    external_url: Optional[str] = None
+    prefilled_payload: Optional[Dict[str, Any]] = None
+    status: str = "pending"     # pending, ready, submitted, verified
+
+class RemediationJobCreate(BaseModel):
+    ip_address: str
+    auto_apply_mitigation: bool = False
+    operator_notes: Optional[str] = None
+
+class RemediationJobResponse(BaseModel):
+    job_id: str
+    ip_address: str
+    status: RemediationJobStatus
+    progress_percent: float = 0.0
+    root_cause_analysis: Dict[str, Any] = {}
+    attributed_subscriber: Optional[Dict[str, Any]] = None
+    sanitization_commands: List[str] = []
+    delisting_actions: List[RemediationActionItem] = []
+    geofeed_entry: Optional[str] = None
+    rdns_recommendation: Optional[str] = None
+    verification_schedule: str = "Every 1 hour (24h window)"
+    logs: List[Dict[str, Any]] = []
+    created_at: str
+    updated_at: str
+    completed_at: Optional[str] = None

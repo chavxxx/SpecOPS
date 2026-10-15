@@ -27,12 +27,15 @@ from app.models.ip_intel_schemas import (
     IPInvestigationCreate,
     IPInvestigationItem,
     ReputationStatus,
-    GamingCompatibilitySummary
+    GamingCompatibilitySummary,
+    RemediationJobCreate,
+    RemediationJobResponse
 )
 from app.services.ip_intel.base import is_valid_ip, get_ip_version, is_private_or_special_ip
 from app.services.ip_intel.scanner import get_ip_intel_scanner
 from app.services.ip_intel.cgnat_correlation import CGNATReputationCorrelator
 from app.services.ip_intel.gaming_provider import GamingCompatibilityProvider
+from app.services.ip_intel.remediation_agent import IPRemediationAgent
 
 router = APIRouter(prefix="/ip-intelligence", tags=["IP Intelligence & Reputation"])
 
@@ -466,6 +469,62 @@ async def create_investigation(
         assigned_operator=user.username
     )
     return {"success": True, "investigation_id": inv_id}
+
+# ---------------------------------------------------------------------------
+# 7. AUTONOMOUS IP REMEDIATION & CLEANING AGENT
+# ---------------------------------------------------------------------------
+@router.post("/remediation/jobs", response_model=RemediationJobResponse)
+async def create_remediation_job(
+    req: RemediationJobCreate,
+    db: DatabaseManager = Depends(get_db),
+    user: UserResponse = Depends(require_admin)
+):
+    """
+    Triggers the Autonomous IP Remediation & Delisting Agent to diagnose, sanitize,
+    and generate automated delisting submissions for an IP.
+    """
+    ip = req.ip_address.strip()
+    if not is_valid_ip(ip):
+        raise HTTPException(status_code=400, detail="Invalid IP address format.")
+
+    agent = IPRemediationAgent(db)
+    return await agent.diagnose_and_create_job(
+        ip_address=ip,
+        auto_apply_mitigation=req.auto_apply_mitigation,
+        operator_notes=req.operator_notes
+    )
+
+@router.get("/remediation/jobs", response_model=List[RemediationJobResponse])
+async def list_remediation_jobs(
+    ip_address: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: DatabaseManager = Depends(get_db),
+    user: UserResponse = Depends(require_read_or_admin)
+):
+    agent_jobs = db.list_remediation_jobs(ip_address=ip_address, status=status, limit=limit, offset=offset)
+    return [RemediationJobResponse(**j) for j in agent_jobs]
+
+@router.get("/remediation/jobs/{job_id}", response_model=RemediationJobResponse)
+async def get_remediation_job(
+    job_id: str,
+    db: DatabaseManager = Depends(get_db),
+    user: UserResponse = Depends(require_read_or_admin)
+):
+    job = db.get_remediation_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Remediation job not found.")
+    return RemediationJobResponse(**job)
+
+@router.post("/remediation/jobs/{job_id}/verify-clean", response_model=Dict[str, Any])
+async def verify_remediation_clean(
+    job_id: str,
+    db: DatabaseManager = Depends(get_db),
+    user: UserResponse = Depends(require_admin)
+):
+    agent = IPRemediationAgent(db)
+    return await agent.verify_clean_status(job_id)
 
 # ---------------------------------------------------------------------------
 # 8. EXPORT TO CSV AND JSON

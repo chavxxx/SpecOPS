@@ -181,6 +181,27 @@ class IPIntelDatabaseMixin:
             );
         """)
 
+        # 9. Autonomous Remediation & Cleaning jobs table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS ip_intel_remediation_jobs (
+                job_id TEXT PRIMARY KEY,
+                ip_address TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'evaluating',
+                progress_percent REAL DEFAULT 0.0,
+                root_cause_json TEXT,
+                attributed_subscriber_json TEXT,
+                sanitization_commands_json TEXT,
+                delisting_actions_json TEXT,
+                geofeed_entry TEXT,
+                rdns_recommendation TEXT,
+                verification_schedule TEXT,
+                logs_json TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                completed_at TIMESTAMP
+            );
+        """)
+
         # Indexes for fast querying
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_intel_inv_ip ON ip_intel_inventory (ip_address);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_intel_obs_ip_time ON ip_intel_observations (ip_address, check_timestamp);")
@@ -743,6 +764,28 @@ class IPIntelDatabaseMixin:
                     item["raw_reference"] = None
             return item
 
+    def get_recent_observations_for_ip(self, ip_address: str, max_age_seconds: int = 86400) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM ip_intel_observations
+                WHERE ip_address = ?
+                  AND created_at >= datetime('now', '-' || ? || ' seconds')
+                ORDER BY check_timestamp DESC;
+            """, (ip_address, max_age_seconds))
+            rows = cursor.fetchall()
+            cols = [d[0] for d in cursor.description]
+            items = []
+            seen_provs = set()
+            for row in rows:
+                item = dict(zip(cols, row))
+                p_id = item["provider_id"]
+                if p_id not in seen_provs:
+                    seen_provs.add(p_id)
+                    item["is_listed"] = bool(item["is_listed"])
+                    items.append(item)
+            return items
+
     def get_ip_reputation_history(self, ip_address: str, limit: int = 50) -> List[Dict[str, Any]]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -1029,4 +1072,126 @@ class IPIntelDatabaseMixin:
                     username, action, target_type, target_id, details_json
                 ) VALUES (?, ?, ?, ?, ?);
             """, (username, action, target_type, target_id, json.dumps(details or {})))
+            conn.commit()
+
+    # ------------------------------------------------------------------------
+    # Remediation & Cleaning Jobs
+    # ------------------------------------------------------------------------
+    def create_remediation_job(
+        self,
+        job_id: str,
+        ip_address: str,
+        status: str = "evaluating",
+        progress_percent: float = 0.0,
+        root_cause: Optional[Dict[str, Any]] = None,
+        attributed_subscriber: Optional[Dict[str, Any]] = None,
+        sanitization_commands: Optional[List[str]] = None,
+        delisting_actions: Optional[List[Dict[str, Any]]] = None,
+        geofeed_entry: Optional[str] = None,
+        rdns_recommendation: Optional[str] = None,
+        verification_schedule: str = "Every 1 hour (24h window)",
+        logs: Optional[List[Dict[str, Any]]] = None
+    ) -> str:
+        now = get_utc_now_iso()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO ip_intel_remediation_jobs (
+                    job_id, ip_address, status, progress_percent,
+                    root_cause_json, attributed_subscriber_json,
+                    sanitization_commands_json, delisting_actions_json,
+                    geofeed_entry, rdns_recommendation, verification_schedule,
+                    logs_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """, (
+                job_id, ip_address, status, progress_percent,
+                json.dumps(root_cause or {}),
+                json.dumps(attributed_subscriber) if attributed_subscriber else None,
+                json.dumps(sanitization_commands or []),
+                json.dumps(delisting_actions or []),
+                geofeed_entry, rdns_recommendation, verification_schedule,
+                json.dumps(logs or []), now, now
+            ))
+            conn.commit()
+            return job_id
+
+    def get_remediation_job(self, job_id: str) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM ip_intel_remediation_jobs WHERE job_id = ?;", (job_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            cols = [d[0] for d in cursor.description]
+            d = dict(zip(cols, row))
+            d["root_cause_analysis"] = json.loads(d.get("root_cause_json") or "{}")
+            d["attributed_subscriber"] = json.loads(d.get("attributed_subscriber_json") or "null")
+            d["sanitization_commands"] = json.loads(d.get("sanitization_commands_json") or "[]")
+            d["delisting_actions"] = json.loads(d.get("delisting_actions_json") or "[]")
+            d["logs"] = json.loads(d.get("logs_json") or "[]")
+            return d
+
+    def list_remediation_jobs(
+        self,
+        ip_address: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        query = "SELECT * FROM ip_intel_remediation_jobs WHERE 1=1"
+        params: List[Any] = []
+        if ip_address:
+            query += " AND ip_address = ?"
+            params.append(ip_address)
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            cols = [d[0] for d in cursor.description]
+            results = []
+            for r in rows:
+                d = dict(zip(cols, r))
+                d["root_cause_analysis"] = json.loads(d.get("root_cause_json") or "{}")
+                d["attributed_subscriber"] = json.loads(d.get("attributed_subscriber_json") or "null")
+                d["sanitization_commands"] = json.loads(d.get("sanitization_commands_json") or "[]")
+                d["delisting_actions"] = json.loads(d.get("delisting_actions_json") or "[]")
+                d["logs"] = json.loads(d.get("logs_json") or "[]")
+                results.append(d)
+            return results
+
+    def update_remediation_job(
+        self,
+        job_id: str,
+        status: Optional[str] = None,
+        progress_percent: Optional[float] = None,
+        logs: Optional[List[Dict[str, Any]]] = None,
+        completed: bool = False
+    ):
+        now = get_utc_now_iso()
+        updates = ["updated_at = ?"]
+        params: List[Any] = [now]
+        if status:
+            updates.append("status = ?")
+            params.append(status)
+        if progress_percent is not None:
+            updates.append("progress_percent = ?")
+            params.append(progress_percent)
+        if logs is not None:
+            updates.append("logs_json = ?")
+            params.append(json.dumps(logs))
+        if completed:
+            updates.append("completed_at = ?")
+            params.append(now)
+
+        params.append(job_id)
+        query = f"UPDATE ip_intel_remediation_jobs SET {', '.join(updates)} WHERE job_id = ?;"
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
             conn.commit()

@@ -438,3 +438,42 @@ async def test_ip_intel_api_overview_and_check(admin_headers, analyst_headers):
         assert "mlbb" in game_ids
         assert "valorant_riot" in game_ids
         assert "roblox" in game_ids
+
+        # 6. Autonomous IP Remediation & Delisting Agent endpoints
+        # Analyst cannot start remediation
+        res_rem_unauth = await client.post(
+            "/api/ip-intelligence/remediation/jobs",
+            headers=analyst_headers,
+            json={"ip_address": "157.119.69.129"}
+        )
+        assert res_rem_unauth.status_code == 403
+
+        # Admin starts remediation job
+        res_rem = await client.post(
+            "/api/ip-intelligence/remediation/jobs",
+            headers=admin_headers,
+            json={"ip_address": "157.119.69.129", "operator_notes": "Automated cleaning test"}
+        )
+        assert res_rem.status_code == 200
+        rem_data = res_rem.json()
+        job_id = rem_data["job_id"]
+        assert job_id.startswith("clean-")
+        assert rem_data["ip_address"] == "157.119.69.129"
+        assert len(rem_data["sanitization_commands"]) >= 2
+        assert len(rem_data["delisting_actions"]) >= 4
+        assert "157.119.69.129" in rem_data["geofeed_entry"]
+
+        # List remediation jobs
+        res_list_rem = await client.get("/api/ip-intelligence/remediation/jobs", headers=analyst_headers)
+        assert res_list_rem.status_code == 200
+        assert len(res_list_rem.json()) >= 1
+
+        # Get specific job
+        res_get_rem = await client.get(f"/api/ip-intelligence/remediation/jobs/{job_id}", headers=analyst_headers)
+        assert res_get_rem.status_code == 200
+        assert res_get_rem.json()["job_id"] == job_id
+
+        # Verify clean check
+        res_verify = await client.post(f"/api/ip-intelligence/remediation/jobs/{job_id}/verify-clean", headers=admin_headers)
+        assert res_verify.status_code == 200
+        assert res_verify.json()["success"] is True

@@ -16,11 +16,13 @@ from app.services.ip_intel.greynoise_provider import GreyNoiseProvider
 from app.services.ip_intel.cisco_talos_provider import CiscoTalosProvider
 from app.services.ip_intel.rdns_provider import ReverseDNSProvider
 from app.services.ip_intel.gaming_provider import GamingCompatibilityProvider
+from app.services.ip_intel.remediation_agent import IPRemediationAgent
 from app.services.ip_intel.scoring_engine import ReputationScoringEngine
 from app.services.ip_intel.cgnat_correlation import CGNATReputationCorrelator
 from app.services.ip_intel.scanner import IPIntelScanner, get_ip_intel_scanner
 
 __all__ = [
+    "IPRemediationAgent",
     "GamingCompatibilityProvider",
     "BaseReputationProvider",
     "is_valid_ip",

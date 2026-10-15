@@ -769,6 +769,9 @@ async function loadIPIntelInventory() {
             <button onclick="quickCheckIP('${it.ip_address}')" class="px-2 py-1 rounded bg-dark-700 hover:bg-dark-600 text-slate-200 text-xs font-semibold border border-slate-600 transition-all flex items-center gap-1">
               <i data-lucide="shield-check" class="w-3 h-3 text-cyan-400"></i> Check
             </button>
+            <button onclick="openRemediationModal('${it.ip_address}')" class="px-2 py-1 rounded bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs font-semibold border border-amber-500/30 transition-all flex items-center gap-1" title="Clean & Delist IP Agent">
+              <i data-lucide="sparkles" class="w-3 h-3 text-amber-400"></i> Clean
+            </button>
             <button onclick="deleteInventoryIP('${it.ip_address}')" class="p-1 rounded hover:bg-rose-950/40 text-slate-400 hover:text-rose-400 transition-all border border-transparent hover:border-rose-500/30" title="Delete IP">
               <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
             </button>
@@ -956,4 +959,351 @@ async function testProviderConnectivity(providerId) {
   } catch (e) {
     showIntelToast(`Test failed: ${e.message}`, true);
   }
+}
+
+// ---------------------------------------------------------------------------
+// 6. AUTONOMOUS IP REMEDIATION & DELISTING AGENT
+// ---------------------------------------------------------------------------
+let currentRemediationJob = null;
+
+async function openRemediationModal(ipAddress) {
+  const ip = (ipAddress || "").trim();
+  if (!ip) {
+    showIntelToast("Please specify an IP address to clean", true);
+    return;
+  }
+
+  const modal = document.getElementById("modal-intel-remediation");
+  if (!modal) return;
+
+  const targetIpEl = document.getElementById("remediation-target-ip");
+  const statusBadge = document.getElementById("remediation-status-badge");
+  const loading = document.getElementById("remediation-loading");
+  const content = document.getElementById("remediation-content");
+
+  if (targetIpEl) targetIpEl.textContent = ip;
+  if (statusBadge) {
+    statusBadge.textContent = "DIAGNOSING";
+    statusBadge.className = "px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30";
+  }
+
+  if (loading) loading.classList.remove("hidden");
+  if (content) {
+    content.classList.add("hidden");
+    content.innerHTML = "";
+  }
+
+  openModal("modal-intel-remediation");
+
+  try {
+    const res = await fetch("/api/ip-intelligence/remediation/jobs", {
+      method: "POST",
+      headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ ip_address: ip, auto_apply_mitigation: false })
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+
+    const job = await res.json();
+    currentRemediationJob = job;
+    renderRemediationDetails(job);
+  } catch (e) {
+    console.error("Remediation Agent error:", e);
+    if (loading) loading.classList.add("hidden");
+    if (content) {
+      content.classList.remove("hidden");
+      content.innerHTML = `
+        <div class="p-6 rounded-xl bg-rose-950/30 border border-rose-500/40 text-center space-y-3">
+          <i data-lucide="alert-triangle" class="w-8 h-8 text-rose-400 mx-auto"></i>
+          <div class="text-sm font-bold text-white">Diagnostic Initiation Failed</div>
+          <div class="text-xs text-rose-300 font-mono">${e.message}</div>
+          <button onclick="openRemediationModal('${ip}')" class="px-4 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold mt-2">Retry Diagnostics</button>
+        </div>
+      `;
+      if (window.lucide) lucide.createIcons();
+    }
+  }
+}
+
+function renderRemediationDetails(job) {
+  const loading = document.getElementById("remediation-loading");
+  const content = document.getElementById("remediation-content");
+  const statusBadge = document.getElementById("remediation-status-badge");
+
+  if (loading) loading.classList.add("hidden");
+  if (!content) return;
+  content.classList.remove("hidden");
+
+  const statusColors = {
+    evaluating: "bg-amber-500/20 text-amber-300 border border-amber-500/40",
+    sanitizing: "bg-orange-500/20 text-orange-300 border border-orange-500/40",
+    delisting: "bg-indigo-500/20 text-indigo-300 border border-indigo-500/40",
+    monitoring: "bg-blue-500/20 text-blue-300 border border-blue-500/40",
+    completed: "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40",
+    failed: "bg-rose-500/20 text-rose-300 border border-rose-500/40"
+  };
+
+  if (statusBadge) {
+    statusBadge.textContent = (job.status || "UNKNOWN").toUpperCase();
+    statusBadge.className = `px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${statusColors[job.status] || 'bg-slate-700 text-slate-300'}`;
+  }
+
+  const rca = job.root_cause_analysis || {};
+  const sub = job.attributed_subscriber;
+  const sanitizationScript = (job.sanitization_commands || []).join("\n");
+
+  content.innerHTML = `
+    <!-- 1. ROOT CAUSE & INCIDENT DIAGNOSTICS -->
+    <div class="p-5 rounded-2xl bg-dark-800/90 border border-slate-700/80 space-y-4">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-700/60">
+        <div class="flex items-center gap-2">
+          <i data-lucide="crosshair" class="w-4 h-4 text-amber-400"></i>
+          <h4 class="text-xs font-black uppercase tracking-wider text-white">Root-Cause Attribution & Abuse Profile</h4>
+        </div>
+        <span class="text-[11px] font-mono text-slate-400">Job ID: ${job.job_id}</span>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div class="p-3 rounded-xl bg-dark-850 border border-slate-700/60">
+          <div class="text-[10px] font-bold text-slate-400 uppercase">Dominant Vector</div>
+          <div class="text-xs font-bold text-rose-300 mt-1 truncate" title="${rca.dominant_vector || 'Mixed'}">${rca.dominant_vector || 'General Abuse'}</div>
+        </div>
+        <div class="p-3 rounded-xl bg-dark-850 border border-slate-700/60">
+          <div class="text-[10px] font-bold text-slate-400 uppercase">Active Blacklists</div>
+          <div class="text-xs font-bold text-white mt-1">${rca.active_listings_count || 0} Listed Providers</div>
+        </div>
+        <div class="p-3 rounded-xl bg-dark-850 border border-slate-700/60">
+          <div class="text-[10px] font-bold text-slate-400 uppercase">Suricata Alerts</div>
+          <div class="text-xs font-bold text-amber-300 mt-1">${rca.suricata_events_detected || 0} Intrusion Events</div>
+        </div>
+        <div class="p-3 rounded-xl bg-dark-850 border border-slate-700/60">
+          <div class="text-[10px] font-bold text-slate-400 uppercase">Flagged Ports</div>
+          <div class="text-xs font-bold font-mono text-cyan-300 mt-1">${(rca.abused_ports && rca.abused_ports.length) ? rca.abused_ports.join(', ') : 'None'}</div>
+        </div>
+      </div>
+
+      <!-- Subscriber Attribution Banner -->
+      ${sub ? `
+        <div class="p-3.5 rounded-xl bg-brand-950/40 border border-brand-500/40 space-y-2">
+          <div class="flex items-center justify-between text-xs font-bold text-brand-300">
+            <span class="flex items-center gap-1.5"><i data-lucide="user-check" class="w-4 h-4 text-emerald-400"></i> Deterministic CGNAT Subscriber Attribution</span>
+            <span class="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">${sub.attribution_status || 'VERIFIED'}</span>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs pt-1">
+            <div>
+              <span class="text-[10px] text-slate-400 uppercase">Subscriber CGNAT IP:</span>
+              <div class="font-mono font-bold text-white">${sub.subscriber_cgnat_ip || '—'}</div>
+            </div>
+            <div>
+              <span class="text-[10px] text-slate-400 uppercase">PPPoE Username:</span>
+              <div class="font-mono font-bold text-indigo-300">${sub.pppoe_username || 'Unrecorded'}</div>
+            </div>
+            <div>
+              <span class="text-[10px] text-slate-400 uppercase">Allocated Port Block:</span>
+              <div class="font-mono font-bold text-cyan-300">${sub.allocated_port_block || '—'}</div>
+            </div>
+          </div>
+        </div>
+      ` : `
+        <div class="p-3 rounded-xl bg-dark-850 border border-slate-700/60 text-xs text-slate-400 flex items-start gap-2">
+          <i data-lucide="info" class="w-4 h-4 text-slate-400 shrink-0 mt-0.5"></i>
+          <span>Public CGNAT address shared across subscribers. To pinpoint the exact customer, ensure the outbound abuse report contains the observed source port.</span>
+        </div>
+      `}
+    </div>
+
+    <!-- 2. MIKROTIK FIREWALL SANITIZATION RULES -->
+    <div class="p-5 rounded-2xl bg-dark-800/90 border border-slate-700/80 space-y-3">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <i data-lucide="terminal" class="w-4 h-4 text-emerald-400"></i>
+          <h4 class="text-xs font-black uppercase tracking-wider text-white">Core RouterOS Traffic Sanitization Rules</h4>
+        </div>
+        <button onclick="copyToClipboard(\`${sanitizationScript.replace(/`/g, '\\`').replace(/\\/g, '\\\\')}\`, 'MikroTik Sanitization Script')" class="px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-xs font-bold flex items-center gap-1.5 transition-all">
+          <i data-lucide="copy" class="w-3.5 h-3.5"></i> Copy RouterOS Rules
+        </button>
+      </div>
+      <p class="text-xs text-slate-400 leading-relaxed">
+        Apply these rules on your MikroTik core router to terminate ongoing malicious egress traffic. Delisting requests submitted while traffic is actively leaking will be rejected or immediately re-flagged.
+      </p>
+      <pre class="p-3.5 rounded-xl bg-dark-900 border border-slate-800 font-mono text-[11px] text-emerald-300/90 overflow-x-auto whitespace-pre-wrap">${sanitizationScript}</pre>
+    </div>
+
+    <!-- 3. GUIDED DELISTING ACTIONS & PORTALS -->
+    <div class="p-5 rounded-2xl bg-dark-800/90 border border-slate-700/80 space-y-3">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <i data-lucide="send" class="w-4 h-4 text-indigo-400"></i>
+          <h4 class="text-xs font-black uppercase tracking-wider text-white">Direct Delisting Portals & Justification Templates</h4>
+        </div>
+        <span class="text-xs text-slate-400">${(job.delisting_actions || []).length} Remediation Actions</span>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        ${(job.delisting_actions || []).map(action => {
+          const reasonText = (action.prefilled_payload && (action.prefilled_payload.reason || action.prefilled_payload.explanation)) || "Subscriber host secured; outbound abuse filtering applied on ISP router.";
+          return `
+            <div class="p-4 rounded-xl bg-dark-850 border border-slate-700/60 flex flex-col justify-between space-y-3">
+              <div>
+                <div class="flex items-center justify-between gap-2">
+                  <div class="font-bold text-white text-xs">${action.provider_name}</div>
+                  <span class="px-2 py-0.5 rounded text-[9px] font-black uppercase ${action.status === 'submitted' ? 'bg-indigo-500/20 text-indigo-300' : 'bg-emerald-500/20 text-emerald-300'}">
+                    ${action.status}
+                  </span>
+                </div>
+                <div class="text-[11px] font-semibold text-slate-300 mt-1">${action.action_title}</div>
+                <p class="text-[11px] text-slate-400 mt-1 leading-snug">${action.description}</p>
+              </div>
+
+              <div class="flex items-center justify-between gap-2 pt-2 border-t border-slate-700/60">
+                <button onclick="copyJustificationText('${reasonText.replace(/'/g, "\\'")}', '${action.provider_name}')" class="px-2.5 py-1 rounded bg-dark-750 hover:bg-dark-700 text-slate-300 text-[11px] font-semibold border border-slate-650 flex items-center gap-1 transition-all" title="Copy prefilled removal justification">
+                  <i data-lucide="clipboard" class="w-3 h-3 text-amber-400"></i> Copy Justification
+                </button>
+                ${action.external_url ? `
+                  <a href="${action.external_url}" target="_blank" rel="noopener noreferrer" class="px-3 py-1 rounded bg-brand-600/30 hover:bg-brand-600/50 text-brand-300 border border-brand-500/30 text-[11px] font-bold flex items-center gap-1 transition-all">
+                    <span>Delist Portal</span>
+                    <i data-lucide="external-link" class="w-3 h-3"></i>
+                  </a>
+                ` : ''}
+              </div>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    </div>
+
+    <!-- 4. REVERSE DNS & RFC 8805 GEOFEED (GAMING ANTI-CHEAT COMPATIBILITY) -->
+    <div class="p-5 rounded-2xl bg-dark-800/90 border border-slate-700/80 space-y-3">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <i data-lucide="gamepad-2" class="w-4 h-4 text-emerald-400"></i>
+          <h4 class="text-xs font-black uppercase tracking-wider text-white">Reverse DNS (PTR) & RFC 8805 Geofeed (Gaming & Anti-Cheat Appeal)</h4>
+        </div>
+      </div>
+      <p class="text-xs text-slate-400 leading-relaxed">
+        Online games (Call of Duty: Mobile, Valorant Vanguard, Mobile Legends) and publisher anti-cheats restrict IPs that lack PTR records or have misattributed geolocation.
+      </p>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+        <div class="p-3.5 rounded-xl bg-dark-850 border border-slate-700/60 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-[10px] font-bold text-slate-400 uppercase">Recommended DNS PTR Record</span>
+            <button onclick="copyToClipboard('${job.rdns_recommendation || ''}', 'Reverse DNS Record')" class="p-1 hover:text-white text-slate-400">
+              <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+          <pre class="p-2 rounded bg-dark-900 border border-slate-800 font-mono text-[10px] text-indigo-300 overflow-x-auto">${job.rdns_recommendation || '—'}</pre>
+        </div>
+
+        <div class="p-3.5 rounded-xl bg-dark-850 border border-slate-700/60 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-[10px] font-bold text-slate-400 uppercase">RFC 8805 Geofeed CSV Line</span>
+            <button onclick="copyToClipboard('${job.geofeed_entry || ''}', 'Geofeed Entry')" class="p-1 hover:text-white text-slate-400">
+              <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+          <pre class="p-2 rounded bg-dark-900 border border-slate-800 font-mono text-[10px] text-cyan-300 overflow-x-auto">${job.geofeed_entry || '—'}</pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. AUTONOMOUS CLEAN VERIFICATION -->
+    <div class="p-5 rounded-2xl bg-dark-800/90 border border-slate-700/80 space-y-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <h4 class="text-xs font-black uppercase tracking-wider text-white flex items-center gap-2">
+            <i data-lucide="check-circle" class="w-4 h-4 text-emerald-400"></i> Autonomous Clean Verification
+          </h4>
+          <p class="text-xs text-slate-400 mt-0.5">Rescans all blacklist providers to verify delisting completion and unbans.</p>
+        </div>
+        <button id="btn-remediation-verify" onclick="verifyRemediationClean('${job.job_id}')" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg shadow-emerald-600/30 flex items-center gap-2 transition-all">
+          <i data-lucide="shield-check" class="w-4 h-4"></i> Verify Clean Status Now
+        </button>
+      </div>
+
+      <div id="remediation-verify-result" class="hidden"></div>
+    </div>
+
+    <!-- 6. AGENT AUDIT LOGS -->
+    <div class="p-4 rounded-xl bg-dark-850 border border-slate-800 space-y-2">
+      <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Agent Action History</div>
+      <div class="space-y-1 max-h-32 overflow-y-auto">
+        ${(job.logs || []).map(l => `
+          <div class="flex items-center justify-between text-[11px] font-mono text-slate-400 py-0.5">
+            <span>${l.message}</span>
+            <span class="text-slate-500 text-[10px]">${formatManilaTime(l.timestamp)}</span>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+
+  if (window.lucide) lucide.createIcons();
+}
+
+async function verifyRemediationClean(jobId) {
+  const btn = document.getElementById("btn-remediation-verify");
+  const resultDiv = document.getElementById("remediation-verify-result");
+  if (!btn || !resultDiv) return;
+
+  const originalHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = `<div class="w-3.5 h-3.5 border-2 border-white/20 border-t-white rounded-full animate-spin"></div> Verifying...`;
+
+  try {
+    const res = await fetch(`/api/ip-intelligence/remediation/jobs/${encodeURIComponent(jobId)}/verify-clean`, {
+      method: "POST",
+      headers: getAuthHeaders()
+    });
+    const data = await res.json();
+    resultDiv.classList.remove("hidden");
+
+    if (data.verified_clean) {
+      resultDiv.innerHTML = `
+        <div class="p-4 rounded-xl bg-emerald-950/40 border border-emerald-500/40 text-emerald-300 flex items-start gap-3">
+          <i data-lucide="shield-check" class="w-5 h-5 text-emerald-400 shrink-0 mt-0.5"></i>
+          <div>
+            <div class="text-xs font-bold text-white">IP Officially Verified Clean!</div>
+            <div class="text-xs text-emerald-300 mt-0.5">${data.message || 'All providers report zero active listings.'}</div>
+          </div>
+        </div>
+      `;
+      const statusBadge = document.getElementById("remediation-status-badge");
+      if (statusBadge) {
+        statusBadge.textContent = "COMPLETED";
+        statusBadge.className = "px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40";
+      }
+      showIntelToast("IP successfully verified clean!");
+      if (typeof loadIPIntelInventory === "function") loadIPIntelInventory();
+    } else {
+      resultDiv.innerHTML = `
+        <div class="p-4 rounded-xl bg-amber-950/40 border border-amber-500/40 text-amber-300 flex items-start gap-3">
+          <i data-lucide="alert-triangle" class="w-5 h-5 text-amber-400 shrink-0 mt-0.5"></i>
+          <div>
+            <div class="text-xs font-bold text-white">Active Listings Still Detected (${data.active_listings_remaining})</div>
+            <div class="text-xs text-amber-300/90 mt-0.5">${data.message}</div>
+          </div>
+        </div>
+      `;
+    }
+    if (window.lucide) lucide.createIcons();
+  } catch (e) {
+    resultDiv.classList.remove("hidden");
+    resultDiv.innerHTML = `
+      <div class="p-3 rounded-xl bg-rose-950/40 border border-rose-500/40 text-rose-300 text-xs">
+        Verification error: ${e.message}
+      </div>
+    `;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalHtml;
+    if (window.lucide) lucide.createIcons();
+  }
+}
+
+function copyJustificationText(text, providerName) {
+  copyToClipboard(text, `${providerName} Justification`);
 }
