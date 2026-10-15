@@ -1018,47 +1018,171 @@ async function loadSensorHealth(isManual = false) {
     const integrations = Array.isArray(data.integrations) ? data.integrations : [];
     const sensors = Array.isArray(data.sensors) ? data.sensors : [];
 
-    // Integrations list
+    // 1. Update KPI Summary Cards
+    const kpiStatus = document.getElementById("sec-health-kpi-status");
+    const kpiBadge = document.getElementById("sec-health-kpi-badge");
+    const kpiStatusSub = document.getElementById("sec-health-kpi-status-sub");
+    const kpiSensors = document.getElementById("sec-health-kpi-sensors");
+    const kpiIntegrations = document.getElementById("sec-health-kpi-integrations");
+    const kpiQueue = document.getElementById("sec-health-kpi-queue");
+
+    const overall = (data.overall_status || "healthy").toLowerCase();
+    if (kpiStatus) {
+      if (overall === "healthy") {
+        kpiStatus.textContent = "Operational";
+        kpiStatus.className = "text-xl font-bold font-mono text-emerald-400 flex items-center gap-2";
+        if (kpiBadge) kpiBadge.className = "w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse";
+        if (kpiStatusSub) kpiStatusSub.textContent = "Carrier Pipeline Active";
+      } else if (overall === "degraded") {
+        kpiStatus.textContent = "Degraded";
+        kpiStatus.className = "text-xl font-bold font-mono text-amber-400 flex items-center gap-2";
+        if (kpiBadge) kpiBadge.className = "w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse";
+        if (kpiStatusSub) kpiStatusSub.textContent = "Check Subsystem Warnings";
+      } else {
+        kpiStatus.textContent = "Offline";
+        kpiStatus.className = "text-xl font-bold font-mono text-rose-400 flex items-center gap-2";
+        if (kpiBadge) kpiBadge.className = "w-2.5 h-2.5 rounded-full bg-rose-400";
+        if (kpiStatusSub) kpiStatusSub.textContent = "Critical Pipeline Failure";
+      }
+    }
+
+    if (kpiSensors) {
+      const activeSensors = data.active_sensors_count !== undefined ? data.active_sensors_count : sensors.filter(s => s.health_status === "healthy").length;
+      const totalSensors = data.total_sensors_count !== undefined ? data.total_sensors_count : sensors.length;
+      kpiSensors.textContent = `${activeSensors} / ${totalSensors} Active`;
+    }
+
+    if (kpiIntegrations) {
+      const onlineInts = data.online_integrations_count !== undefined ? data.online_integrations_count : integrations.filter(i => i.connectivity === "online").length;
+      const totalInts = data.total_integrations_count !== undefined ? data.total_integrations_count : integrations.length;
+      kpiIntegrations.textContent = `${onlineInts} / ${totalInts} Connected`;
+    }
+
+    if (kpiQueue) {
+      const qDepth = data.opensearch_queue_depth !== undefined ? data.opensearch_queue_depth : 0;
+      kpiQueue.textContent = `${qDepth} docs`;
+    }
+
+    // 2. Update Carrier Pipeline Architecture Nodes
+    const nodes = data.pipeline_nodes || {};
+    if (nodes.pre_cgnat) {
+      const preStatus = document.getElementById("pipe-node-pre-cgnat-status");
+      const preMeta = document.getElementById("pipe-node-pre-cgnat-meta");
+      const isOk = nodes.pre_cgnat.status === "healthy";
+      if (preStatus) preStatus.className = `w-2.5 h-2.5 rounded-full ${isOk ? 'bg-emerald-400' : 'bg-amber-400'}`;
+      if (preMeta) preMeta.textContent = isOk ? `${nodes.pre_cgnat.sensors_count || 1} Mirror TAP Active` : 'TAP Inactive';
+    }
+    if (nodes.core_gateway) {
+      const coreStatus = document.getElementById("pipe-node-core-status");
+      const coreMeta = document.getElementById("pipe-node-core-meta");
+      const isOk = nodes.core_gateway.status === "online";
+      if (coreStatus) coreStatus.className = `w-2.5 h-2.5 rounded-full ${isOk ? 'bg-emerald-400' : 'bg-amber-400'}`;
+      if (coreMeta) coreMeta.textContent = isOk ? `CCR2116 (${nodes.core_gateway.lag_ms || 0}ms)` : 'Gateway Degraded';
+    }
+    if (nodes.post_cgnat) {
+      const postStatus = document.getElementById("pipe-node-post-cgnat-status");
+      const postMeta = document.getElementById("pipe-node-post-cgnat-meta");
+      const isOk = nodes.post_cgnat.status === "healthy";
+      if (postStatus) postStatus.className = `w-2.5 h-2.5 rounded-full ${isOk ? 'bg-emerald-400' : 'bg-amber-400'}`;
+      if (postMeta) postMeta.textContent = isOk ? `${nodes.post_cgnat.sensors_count || 1} WAN TAP Active` : 'TAP Inactive';
+    }
+    if (nodes.correlation_engine) {
+      const corrStatus = document.getElementById("pipe-node-correlation-status");
+      if (corrStatus) corrStatus.className = `w-2.5 h-2.5 rounded-full ${overall !== 'offline' ? 'bg-emerald-400' : 'bg-rose-400'}`;
+    }
+    if (nodes.opensearch_queue) {
+      const osStatus = document.getElementById("pipe-node-opensearch-status");
+      const osMeta = document.getElementById("pipe-node-opensearch-meta");
+      const q = nodes.opensearch_queue.queue_depth || 0;
+      if (osStatus) osStatus.className = `w-2.5 h-2.5 rounded-full ${nodes.opensearch_queue.status === 'online' ? 'bg-emerald-400' : 'bg-amber-400'}`;
+      if (osMeta) osMeta.textContent = q > 0 ? `Buffering ${q} docs` : 'Durable Buffer 0';
+    }
+
+    // 3. Integrations list
     const intTbody = document.getElementById("sec-health-integrations-tbody");
     if (intTbody) {
       if (integrations.length === 0) {
-        intTbody.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-slate-400">No integration health data recorded</td></tr>`;
+        intTbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-slate-400">No integration health data recorded</td></tr>`;
       } else {
         intTbody.innerHTML = integrations.map(i => {
           const isOnline = i.connectivity === "online";
+          const isDegraded = i.connectivity === "degraded";
+          const badgeClass = isOnline
+            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+            : (isDegraded ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30');
+          const cleanName = encodeURIComponent(i.integration_name);
+          const btnId = `btn-probe-${i.integration_name.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+
           return `
-            <tr class="border-b border-slate-800 text-xs">
+            <tr class="border-b border-slate-800 text-xs hover:bg-dark-800/40 transition-colors">
               <td class="py-2.5 px-3 font-semibold text-white flex items-center gap-2">
-                <span class="w-2.5 h-2.5 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}"></span>
-                ${i.integration_name}
+                <span class="w-2.5 h-2.5 rounded-full ${isOnline ? 'bg-emerald-400' : (isDegraded ? 'bg-amber-400 animate-pulse' : 'bg-rose-400')}"></span>
+                ${escapeHtml(i.integration_name)}
               </td>
-              <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${isOnline ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}">${i.connectivity}</span></td>
-              <td class="py-2.5 px-3 font-mono text-slate-300">${i.processing_lag_ms} ms</td>
-              <td class="py-2.5 px-3 font-mono text-slate-300">${i.queue_depth}</td>
+              <td class="py-2.5 px-3">
+                <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${badgeClass}">${i.connectivity}</span>
+              </td>
+              <td class="py-2.5 px-3 font-mono text-slate-300">${(i.processing_lag_ms || 0).toFixed(1)} ms</td>
+              <td class="py-2.5 px-3 font-mono text-slate-300">${i.queue_depth || 0}</td>
               <td class="py-2.5 px-3 font-mono text-slate-400">${formatManilaTime(i.last_successful_ingestion)}</td>
-              <td class="py-2.5 px-3 text-slate-400 text-[11px]">${i.last_error || 'None'}</td>
+              <td class="py-2.5 px-3 text-slate-400 text-[11px] max-w-[200px] truncate" title="${escapeHtml(i.last_error || 'Nominal operational')}">
+                ${escapeHtml(i.last_error || 'Nominal operational')}
+              </td>
+              <td class="py-2.5 px-3 text-right">
+                <button onclick="probeSingleIntegration('${cleanName}')" id="${btnId}" class="px-2.5 py-1 rounded-md bg-dark-800 hover:bg-dark-750 border border-slate-700 hover:border-teal-500/50 text-[11px] font-semibold text-slate-200 hover:text-teal-300 inline-flex items-center gap-1 transition-all">
+                  <i data-lucide="activity" class="w-3 h-3 text-teal-400"></i> Probe
+                </button>
+              </td>
             </tr>
           `;
         }).join("");
       }
     }
 
-    // Sensors list
+    // 4. Sensors list
     const sensTbody = document.getElementById("sec-health-sensors-tbody");
     if (sensTbody) {
       if (sensors.length === 0) {
-        sensTbody.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-slate-400">No sensors registered yet</td></tr>`;
+        sensTbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-slate-400">No sensors registered yet</td></tr>`;
       } else {
-        sensTbody.innerHTML = sensors.map(s => `
-          <tr class="border-b border-slate-800 text-xs">
-            <td class="py-2.5 px-3 font-semibold text-white">${s.sensor_name}</td>
-            <td class="py-2.5 px-3 font-mono text-slate-400">${s.sensor_id}</td>
-            <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${s.observation_point === 'pre_cgnat' ? 'bg-indigo-500/20 text-indigo-300' : 'bg-cyan-500/20 text-cyan-300'}">${s.observation_point}</span></td>
-            <td class="py-2.5 px-3 font-mono text-slate-300">${s.host}:${s.interface}</td>
-            <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-500/20 text-emerald-300">${s.health_status}</span></td>
-            <td class="py-2.5 px-3 font-mono text-slate-400">${formatManilaTime(s.last_seen)}</td>
-          </tr>
-        `).join("");
+        sensTbody.innerHTML = sensors.map(s => {
+          const isHealthy = s.health_status === "healthy";
+          const obsBadge = s.observation_point === 'pre_cgnat'
+            ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
+            : (s.observation_point === 'post_cgnat' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' : 'bg-purple-500/20 text-purple-300 border border-purple-500/30');
+          const cleanId = encodeURIComponent(s.sensor_id);
+
+          return `
+            <tr class="border-b border-slate-800 text-xs hover:bg-dark-800/40 transition-colors">
+              <td class="py-2.5 px-3 font-semibold text-white flex items-center gap-2">
+                <i data-lucide="radio" class="w-3.5 h-3.5 ${isHealthy ? 'text-teal-400' : 'text-amber-400'}"></i>
+                <div>
+                  <div>${escapeHtml(s.sensor_name)}</div>
+                  <div class="text-[10px] text-slate-500 font-mono">${escapeHtml(s.sensor_type || 'tap')} &bull; ${escapeHtml(s.version || 'v1.0')}</div>
+                </div>
+              </td>
+              <td class="py-2.5 px-3 font-mono text-slate-400">${escapeHtml(s.sensor_id)}</td>
+              <td class="py-2.5 px-3">
+                <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${obsBadge}">${s.observation_point}</span>
+              </td>
+              <td class="py-2.5 px-3 font-mono text-slate-300">${escapeHtml(s.host)}:${escapeHtml(s.interface)}</td>
+              <td class="py-2.5 px-3">
+                <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${isHealthy ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'}">${s.health_status}</span>
+              </td>
+              <td class="py-2.5 px-3 font-mono text-slate-400">${formatManilaTime(s.last_seen)}</td>
+              <td class="py-2.5 px-3 text-right">
+                <div class="inline-flex items-center gap-1.5 justify-end">
+                  <button onclick="pingSensor('${cleanId}')" title="Send Heartbeat Ping" class="px-2 py-1 rounded bg-dark-800 hover:bg-dark-750 border border-slate-700 text-[11px] text-teal-400 hover:text-teal-300 flex items-center gap-1 transition-all">
+                    <i data-lucide="heart" class="w-3 h-3"></i> Ping
+                  </button>
+                  <button onclick="deleteSensor('${cleanId}')" title="Delete Sensor Observation Point" class="px-2 py-1 rounded bg-dark-800 hover:bg-rose-900/30 border border-slate-700 hover:border-rose-700 text-[11px] text-rose-400 flex items-center gap-1 transition-all">
+                    <i data-lucide="trash-2" class="w-3 h-3"></i>
+                  </button>
+                </div>
+              </td>
+            </tr>
+          `;
+        }).join("");
       }
     }
 
@@ -1073,6 +1197,174 @@ async function loadSensorHealth(isManual = false) {
     }
   } finally {
     if (spinIcon) spinIcon.classList.remove("animate-spin");
+  }
+}
+
+async function probeAllIntegrations() {
+  const btn = document.getElementById("btn-probe-all-health");
+  const icon = document.getElementById("icon-probe-all");
+  if (btn) btn.disabled = true;
+  if (icon) icon.classList.add("animate-spin");
+
+  try {
+    const authHeaders = typeof getAuthHeaders === "function" ? getAuthHeaders() : {};
+    const res = await fetch("/api/security/health/check-all", {
+      method: "POST",
+      headers: { ...authHeaders, "Content-Type": "application/json" },
+      credentials: "include"
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "Probe check failed");
+    }
+    const data = await res.json();
+    showSecurityToast(`Health check complete: ${data.online_integrations_count || 0}/${data.total_integrations_count || 5} subsystems operational`, "success");
+    await loadSensorHealth(false);
+  } catch (e) {
+    console.error("Health probe error:", e);
+    showSecurityToast("Health probe failed: " + e.message, "error");
+  } finally {
+    if (btn) btn.disabled = false;
+    if (icon) icon.classList.remove("animate-spin");
+  }
+}
+
+async function probeSingleIntegration(encodedName) {
+  const name = decodeURIComponent(encodedName);
+  const btnId = `btn-probe-${name.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+  const btn = document.getElementById(btnId);
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<i data-lucide="refresh-cw" class="w-3 h-3 animate-spin"></i> Probing...`;
+  }
+
+  try {
+    const authHeaders = typeof getAuthHeaders === "function" ? getAuthHeaders() : {};
+    const res = await fetch(`/api/security/health/probe/${encodeURIComponent(name)}`, {
+      method: "POST",
+      headers: { ...authHeaders, "Content-Type": "application/json" },
+      credentials: "include"
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "Probe request failed");
+    }
+    const result = await res.json();
+    const st = result.probe?.status || "online";
+    showSecurityToast(`${name} probe: ${st.toUpperCase()}`, st === "online" ? "success" : "warning");
+    await loadSensorHealth(false);
+  } catch (e) {
+    console.error(`Probe error on ${name}:`, e);
+    showSecurityToast(`Probe failed on ${name}: ${e.message}`, "error");
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `<i data-lucide="activity" class="w-3 h-3 text-teal-400"></i> Probe`;
+      if (window.lucide) lucide.createIcons();
+    }
+  }
+}
+
+function openAddSensorModal() {
+  const modal = document.getElementById("modal-add-sensor");
+  if (!modal) return;
+  document.getElementById("modal-sensor-name").value = "";
+  document.getElementById("modal-sensor-id").value = "";
+  document.getElementById("modal-sensor-type").value = "suricata";
+  document.getElementById("modal-sensor-obs-point").value = "pre_cgnat";
+  document.getElementById("modal-sensor-host").value = "";
+  document.getElementById("modal-sensor-interface").value = "";
+  document.getElementById("modal-sensor-version").value = "Suricata 7.0.2";
+  document.getElementById("modal-sensor-enabled").checked = true;
+  modal.classList.remove("hidden");
+  if (window.lucide) lucide.createIcons();
+}
+
+function closeAddSensorModal() {
+  const modal = document.getElementById("modal-add-sensor");
+  if (modal) modal.classList.add("hidden");
+}
+
+async function saveSensor(e) {
+  e.preventDefault();
+  const btn = document.getElementById("btn-save-sensor");
+  if (btn) btn.disabled = true;
+
+  const payload = {
+    sensor_name: document.getElementById("modal-sensor-name").value.trim(),
+    sensor_id: document.getElementById("modal-sensor-id").value.trim() || undefined,
+    sensor_type: document.getElementById("modal-sensor-type").value,
+    observation_point: document.getElementById("modal-sensor-obs-point").value,
+    host: document.getElementById("modal-sensor-host").value.trim(),
+    interface: document.getElementById("modal-sensor-interface").value.trim(),
+    version: document.getElementById("modal-sensor-version").value.trim() || undefined,
+    enabled: document.getElementById("modal-sensor-enabled").checked,
+    health_status: "healthy"
+  };
+
+  try {
+    const authHeaders = typeof getAuthHeaders === "function" ? getAuthHeaders() : {};
+    const res = await fetch("/api/security/health/sensors", {
+      method: "POST",
+      headers: { ...authHeaders, "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "Failed to register sensor");
+    }
+
+    showSecurityToast(`Sensor ${payload.sensor_name} registered successfully!`, "success");
+    closeAddSensorModal();
+    await loadSensorHealth(false);
+  } catch (err) {
+    showSecurityToast("Failed to register sensor: " + err.message, "error");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function pingSensor(encodedId) {
+  const sensorId = decodeURIComponent(encodedId);
+  try {
+    const authHeaders = typeof getAuthHeaders === "function" ? getAuthHeaders() : {};
+    const res = await fetch(`/api/security/health/sensors/${encodeURIComponent(sensorId)}/heartbeat`, {
+      method: "POST",
+      headers: { ...authHeaders, "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ health_status: "healthy" })
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "Heartbeat ping failed");
+    }
+    showSecurityToast(`Heartbeat sent to sensor ${sensorId}`, "success");
+    await loadSensorHealth(false);
+  } catch (err) {
+    showSecurityToast("Ping failed: " + err.message, "error");
+  }
+}
+
+async function deleteSensor(encodedId) {
+  const sensorId = decodeURIComponent(encodedId);
+  if (!confirm(`Are you sure you want to remove observation point sensor "${sensorId}"?`)) return;
+
+  try {
+    const authHeaders = typeof getAuthHeaders === "function" ? getAuthHeaders() : {};
+    const res = await fetch(`/api/security/health/sensors/${encodeURIComponent(sensorId)}`, {
+      method: "DELETE",
+      headers: authHeaders,
+      credentials: "include"
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "Failed to delete sensor");
+    }
+    showSecurityToast(`Sensor ${sensorId} removed successfully`, "success");
+    await loadSensorHealth(false);
+  } catch (err) {
+    showSecurityToast("Failed to delete sensor: " + err.message, "error");
   }
 }
 

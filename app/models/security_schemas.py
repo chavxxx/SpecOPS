@@ -123,6 +123,17 @@ class Sensor(BaseModel):
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
+class SensorCreate(BaseModel):
+    sensor_id: Optional[str] = None
+    sensor_name: str
+    sensor_type: str = "suricata" # suricata, akvorado, routeros_mirror, tap
+    observation_point: str = "pre_cgnat" # pre_cgnat, post_cgnat
+    host: str
+    interface: str
+    enabled: bool = True
+    health_status: str = "healthy"
+    version: Optional[str] = None
+
 # -------------------------------------------------------------
 # ATTRIBUTION LOOKUP SCHEMAS
 # -------------------------------------------------------------

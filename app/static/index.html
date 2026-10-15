@@ -864,27 +864,171 @@
     <!-- TAB: SENSOR & INTEGRATION HEALTH -->
     <!-- ========================================================= -->
     <section id="tab-sec-health" class="tab-content hidden space-y-6">
+      <!-- Section Header & Action Toolbar -->
       <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-800">
         <div>
           <h2 class="text-xl font-bold text-white flex items-center gap-2">
             <i data-lucide="heart-pulse" class="w-6 h-6 text-teal-400"></i>
             Sensor Observation Points & Pipeline Health
           </h2>
-          <p class="text-xs text-slate-400 mt-1">Live status of RouterOS CCR2116 routers, Suricata IDS, Akvorado, OpenSearch durable queue, and interfaces</p>
+          <p class="text-xs text-slate-400 mt-1">Live diagnostic telemetry for MikroTik RouterOS CCR2116 routers, Suricata IDS, Akvorado, OpenSearch durable queue, and network TAPs</p>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
+          <button onclick="probeAllIntegrations()" id="btn-probe-all-health" class="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-teal-500/20 transition-all">
+            <i data-lucide="activity" class="w-3.5 h-3.5" id="icon-probe-all"></i> Run Health Probes
+          </button>
+          <button onclick="openAddSensorModal()" class="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-cyan-500/20 transition-all">
+            <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i> Add Sensor / TAP
+          </button>
           <button onclick="loadSensorHealth(true)" class="px-3 py-1.5 rounded-lg bg-dark-800 hover:bg-dark-750 border border-slate-700 text-xs font-semibold text-slate-200 flex items-center gap-1.5 transition-all">
             <i data-lucide="refresh-cw" id="sec-health-refresh-icon" class="w-3.5 h-3.5"></i> Refresh
           </button>
         </div>
       </div>
 
+      <!-- Health KPI Summary Cards -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <!-- Overall Pipeline Health -->
+        <div class="p-4 rounded-2xl bg-dark-850 border border-slate-800 relative overflow-hidden group">
+          <div class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1 flex items-center justify-between">
+            <span>Pipeline Status</span>
+            <span id="sec-health-kpi-badge" class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+          </div>
+          <div class="text-xl font-bold font-mono text-emerald-400 flex items-center gap-2" id="sec-health-kpi-status">
+            Operational
+          </div>
+          <div class="text-[11px] text-slate-400 mt-1" id="sec-health-kpi-status-sub">Carrier Pipeline Active</div>
+        </div>
+
+        <!-- Active Observation Sensors -->
+        <div class="p-4 rounded-2xl bg-dark-850 border border-slate-800 group">
+          <div class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1 flex items-center justify-between">
+            <span>Observation Points</span>
+            <i data-lucide="radio" class="w-4 h-4 text-cyan-400"></i>
+          </div>
+          <div class="text-xl font-bold font-mono text-white" id="sec-health-kpi-sensors">
+            3 / 3 Active
+          </div>
+          <div class="text-[11px] text-slate-400 mt-1">Pre & Post CGNAT TAPs</div>
+        </div>
+
+        <!-- Online Subsystems -->
+        <div class="p-4 rounded-2xl bg-dark-850 border border-slate-800 group">
+          <div class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1 flex items-center justify-between">
+            <span>Subsystems Online</span>
+            <i data-lucide="layers" class="w-4 h-4 text-teal-400"></i>
+          </div>
+          <div class="text-xl font-bold font-mono text-white" id="sec-health-kpi-integrations">
+            5 / 5 Connected
+          </div>
+          <div class="text-[11px] text-slate-400 mt-1">Core, AC, Flow & IDS</div>
+        </div>
+
+        <!-- OpenSearch Durable Queue -->
+        <div class="p-4 rounded-2xl bg-dark-850 border border-slate-800 group">
+          <div class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1 flex items-center justify-between">
+            <span>Durable Queue Depth</span>
+            <i data-lucide="database" class="w-4 h-4 text-indigo-400"></i>
+          </div>
+          <div class="text-xl font-bold font-mono text-indigo-300" id="sec-health-kpi-queue">
+            0 docs
+          </div>
+          <div class="text-[11px] text-slate-400 mt-1">Zero pending failover buffer</div>
+        </div>
+      </div>
+
+      <!-- Carrier Pipeline Architecture Flow Diagram -->
+      <div class="rounded-2xl bg-dark-850 border border-slate-800 p-5 shadow-xl space-y-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-sm font-bold text-white flex items-center gap-2">
+            <i data-lucide="git-commit" class="w-4 h-4 text-cyan-400"></i>
+            Carrier Pipeline Topology & Telemetry Flow
+          </h3>
+          <span class="text-[11px] font-mono text-slate-400 bg-dark-900 px-2.5 py-1 rounded-md border border-slate-700/60">
+            NAT444 Real-time Attribution Flow
+          </span>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-5 gap-3 relative">
+          <!-- Node 1: Pre-CGNAT Mirror TAP -->
+          <div id="pipe-node-pre-cgnat" class="p-3.5 rounded-xl bg-dark-900 border border-slate-700/60 flex flex-col justify-between transition-all hover:border-cyan-500/50">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-[10px] font-bold tracking-wider uppercase text-cyan-400">1. Ingress</span>
+              <span id="pipe-node-pre-cgnat-status" class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+            </div>
+            <div class="text-xs font-bold text-white flex items-center gap-1.5">
+              <i data-lucide="arrow-down-left" class="w-3.5 h-3.5 text-cyan-400"></i>
+              Pre-CGNAT TAP
+            </div>
+            <div class="text-[10px] text-slate-400 mt-1 font-mono">100.64.0.0/10 Subscriber</div>
+            <div class="text-[10px] text-emerald-400 font-semibold mt-2" id="pipe-node-pre-cgnat-meta">Mirror Active</div>
+          </div>
+
+          <!-- Node 2: Core NAT Gateway -->
+          <div id="pipe-node-core-gateway" class="p-3.5 rounded-xl bg-dark-900 border border-slate-700/60 flex flex-col justify-between transition-all hover:border-cyan-500/50">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-[10px] font-bold tracking-wider uppercase text-teal-400">2. Translation</span>
+              <span id="pipe-node-core-status" class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+            </div>
+            <div class="text-xs font-bold text-white flex items-center gap-1.5">
+              <i data-lucide="cpu" class="w-3.5 h-3.5 text-teal-400"></i>
+              Core CCR2116
+            </div>
+            <div class="text-[10px] text-slate-400 mt-1 font-mono">NAT444 Engine</div>
+            <div class="text-[10px] text-teal-400 font-semibold mt-2" id="pipe-node-core-meta">Deterministic CGNAT</div>
+          </div>
+
+          <!-- Node 3: Post-CGNAT Border TAP -->
+          <div id="pipe-node-post-cgnat" class="p-3.5 rounded-xl bg-dark-900 border border-slate-700/60 flex flex-col justify-between transition-all hover:border-cyan-500/50">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-[10px] font-bold tracking-wider uppercase text-cyan-400">3. Egress WAN</span>
+              <span id="pipe-node-post-cgnat-status" class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+            </div>
+            <div class="text-xs font-bold text-white flex items-center gap-1.5">
+              <i data-lucide="arrow-up-right" class="w-3.5 h-3.5 text-cyan-400"></i>
+              Post-CGNAT TAP
+            </div>
+            <div class="text-[10px] text-slate-400 mt-1 font-mono">Public IPv4 Transit</div>
+            <div class="text-[10px] text-emerald-400 font-semibold mt-2" id="pipe-node-post-cgnat-meta">Border Uplink TAP</div>
+          </div>
+
+          <!-- Node 4: Correlation Engine -->
+          <div id="pipe-node-correlation" class="p-3.5 rounded-xl bg-dark-900 border border-slate-700/60 flex flex-col justify-between transition-all hover:border-cyan-500/50">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-[10px] font-bold tracking-wider uppercase text-indigo-400">4. Correlation</span>
+              <span id="pipe-node-correlation-status" class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+            </div>
+            <div class="text-xs font-bold text-white flex items-center gap-1.5">
+              <i data-lucide="sparkles" class="w-3.5 h-3.5 text-indigo-400"></i>
+              Correlation Engine
+            </div>
+            <div class="text-[10px] text-slate-400 mt-1 font-mono">Port Block + PPPoE</div>
+            <div class="text-[10px] text-indigo-400 font-semibold mt-2" id="pipe-node-correlation-meta">Attribution Active</div>
+          </div>
+
+          <!-- Node 5: OpenSearch & Durable Queue -->
+          <div id="pipe-node-opensearch" class="p-3.5 rounded-xl bg-dark-900 border border-slate-700/60 flex flex-col justify-between transition-all hover:border-cyan-500/50">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-[10px] font-bold tracking-wider uppercase text-purple-400">5. Storage</span>
+              <span id="pipe-node-opensearch-status" class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+            </div>
+            <div class="text-xs font-bold text-white flex items-center gap-1.5">
+              <i data-lucide="hard-drive" class="w-3.5 h-3.5 text-purple-400"></i>
+              OpenSearch Queue
+            </div>
+            <div class="text-[10px] text-slate-400 mt-1 font-mono">Forensic Indexing</div>
+            <div class="text-[10px] text-purple-400 font-semibold mt-2" id="pipe-node-opensearch-meta">Durable Buffer 0</div>
+          </div>
+        </div>
+      </div>
+
       <!-- Integrations Table -->
       <div class="rounded-2xl bg-dark-850 border border-slate-800 overflow-hidden shadow-xl">
-        <div class="p-4 border-b border-slate-800">
+        <div class="p-4 border-b border-slate-800 flex items-center justify-between">
           <h3 class="text-sm font-bold text-white flex items-center gap-2">
             <i data-lucide="layers" class="w-4 h-4 text-cyan-400"></i> Core Subsystems & Integrations
           </h3>
+          <span class="text-[11px] text-slate-400">Active monitoring & failover state</span>
         </div>
         <div class="overflow-x-auto">
           <table class="w-full text-left">
@@ -895,11 +1039,12 @@
                 <th class="py-2.5 px-3">Processing Lag</th>
                 <th class="py-2.5 px-3">Queue Depth</th>
                 <th class="py-2.5 px-3">Last Ingestion (PHT)</th>
-                <th class="py-2.5 px-3">Last Error</th>
+                <th class="py-2.5 px-3">Diagnostic Status</th>
+                <th class="py-2.5 px-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody id="sec-health-integrations-tbody" class="divide-y divide-slate-800/60 font-mono text-xs">
-              <tr><td colspan="6" class="text-center py-6 text-slate-500">Loading integration health...</td></tr>
+              <tr><td colspan="7" class="text-center py-6 text-slate-500">Loading integration health...</td></tr>
             </tbody>
           </table>
         </div>
@@ -907,10 +1052,13 @@
 
       <!-- Sensors Table -->
       <div class="rounded-2xl bg-dark-850 border border-slate-800 overflow-hidden shadow-xl">
-        <div class="p-4 border-b border-slate-800">
+        <div class="p-4 border-b border-slate-800 flex items-center justify-between">
           <h3 class="text-sm font-bold text-white flex items-center gap-2">
             <i data-lucide="radio" class="w-4 h-4 text-teal-400"></i> Observation Point Sensors & TAPs
           </h3>
+          <button onclick="openAddSensorModal()" class="px-2.5 py-1 rounded-md bg-dark-800 hover:bg-dark-750 border border-slate-700 text-xs font-semibold text-cyan-400 flex items-center gap-1">
+            <i data-lucide="plus" class="w-3 h-3"></i> Add Sensor
+          </button>
         </div>
         <div class="overflow-x-auto">
           <table class="w-full text-left">
@@ -919,13 +1067,14 @@
                 <th class="py-2.5 px-3">Sensor Name</th>
                 <th class="py-2.5 px-3">Sensor ID</th>
                 <th class="py-2.5 px-3">Observation Point</th>
-                <th class="py-2.5 px-3">Host:Interface</th>
+                <th class="py-2.5 px-3">Host : Interface</th>
                 <th class="py-2.5 px-3">Status</th>
                 <th class="py-2.5 px-3">Last Heartbeat (PHT)</th>
+                <th class="py-2.5 px-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody id="sec-health-sensors-tbody" class="divide-y divide-slate-800/60 font-mono text-xs">
-              <tr><td colspan="6" class="text-center py-6 text-slate-500">Loading sensors...</td></tr>
+              <tr><td colspan="7" class="text-center py-6 text-slate-500">Loading sensors...</td></tr>
             </tbody>
           </table>
         </div>
@@ -2042,6 +2191,80 @@
       <div class="flex items-center justify-end pt-3 border-t border-slate-800">
         <button onclick="closeMikroTikFlowModal()" class="px-5 py-2 rounded-xl bg-dark-800 hover:bg-dark-700 border border-slate-700 text-slate-200 text-xs font-semibold">Done</button>
       </div>
+    </div>
+  </div>
+
+  <!-- MODAL: ADD OBSERVATION POINT SENSOR / TAP -->
+  <div id="modal-add-sensor" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+    <div class="bg-dark-850 border border-slate-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200">
+      <div class="p-5 border-b border-slate-800 flex items-center justify-between">
+        <h3 class="text-base font-bold text-white flex items-center gap-2">
+          <i data-lucide="radio" class="w-5 h-5 text-teal-400"></i>
+          Register Observation Point Sensor / TAP
+        </h3>
+        <button onclick="closeAddSensorModal()" class="text-slate-400 hover:text-white transition-colors">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+      <form onsubmit="saveSensor(event)" class="p-5 space-y-4 text-xs">
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">Sensor Identifier Name *</label>
+          <input type="text" id="modal-sensor-name" required placeholder="e.g. Core BGP Transit SFP+ TAP" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-slate-700 text-white focus:outline-none focus:border-teal-500">
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">Sensor ID (Optional)</label>
+            <input type="text" id="modal-sensor-id" placeholder="e.g. sensor-post-cgnat-02" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-slate-700 text-white font-mono focus:outline-none focus:border-teal-500">
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">Sensor Type</label>
+            <select id="modal-sensor-type" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-slate-700 text-white focus:outline-none focus:border-teal-500">
+              <option value="suricata">Suricata IDS Engine</option>
+              <option value="akvorado">Akvorado Flow Collector</option>
+              <option value="routeros_mirror">RouterOS Switch Mirror</option>
+              <option value="tap">Hardware Optical TAP</option>
+              <option value="syslog">Syslog / Log Agent</option>
+            </select>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">Observation Point *</label>
+            <select id="modal-sensor-obs-point" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-slate-700 text-white focus:outline-none focus:border-teal-500">
+              <option value="pre_cgnat">Pre-CGNAT (Subscriber / Ingress)</option>
+              <option value="post_cgnat">Post-CGNAT (Public WAN / Egress)</option>
+              <option value="core_gateway">Core NAT Gateway</option>
+              <option value="border_edge">Border BGP Edge</option>
+            </select>
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">Host / Management IP *</label>
+            <input type="text" id="modal-sensor-host" required placeholder="e.g. 157.119.69.129" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-slate-700 text-white font-mono focus:outline-none focus:border-teal-500">
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">Monitored Interface / Port *</label>
+            <input type="text" id="modal-sensor-interface" required placeholder="e.g. sfp-sfpplus2-wan-transit" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-slate-700 text-white font-mono focus:outline-none focus:border-teal-500">
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">Software / Firmware Version</label>
+            <input type="text" id="modal-sensor-version" placeholder="e.g. Suricata 7.0.2 / RouterOS v7.16" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-slate-700 text-white focus:outline-none focus:border-teal-500">
+          </div>
+        </div>
+        <div class="flex items-center gap-2 pt-1">
+          <input type="checkbox" id="modal-sensor-enabled" checked class="rounded bg-dark-850 border-slate-700 text-teal-500 focus:ring-0">
+          <label for="modal-sensor-enabled" class="text-xs text-slate-300">Sensor enabled and actively capturing frames</label>
+        </div>
+        <div class="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+          <button type="button" onclick="closeAddSensorModal()" class="px-4 py-2 rounded-lg bg-dark-800 hover:bg-dark-750 border border-slate-700 font-semibold text-slate-300">
+            Cancel
+          </button>
+          <button type="submit" id="btn-save-sensor" class="px-4 py-2 rounded-lg bg-teal-600 hover:bg-teal-500 font-semibold text-white shadow-md shadow-teal-500/20">
+            Register Sensor
+          </button>
+        </div>
+      </form>
     </div>
   </div>
 

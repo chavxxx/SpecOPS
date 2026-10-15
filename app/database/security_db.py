@@ -660,6 +660,63 @@ class SecurityDatabaseMixin:
             """, (now, health_status, now, sensor_id))
             conn.commit()
 
+    def add_sensor(self, sensor: Sensor) -> bool:
+        now = get_utc_now_iso()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO sensors (
+                    sensor_id, sensor_name, sensor_type, observation_point,
+                    host, interface, enabled, last_seen, health_status, version,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                sensor.sensor_id,
+                sensor.sensor_name,
+                sensor.sensor_type,
+                sensor.observation_point,
+                sensor.host,
+                sensor.interface,
+                1 if sensor.enabled else 0,
+                sensor.last_seen or now,
+                sensor.health_status,
+                sensor.version,
+                sensor.created_at or now,
+                now
+            ))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_sensor(self, sensor_id: str) -> bool:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM sensors WHERE sensor_id = ?", (sensor_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def get_sensor(self, sensor_id: str) -> Optional[Sensor]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM sensors WHERE sensor_id = ?", (sensor_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return Sensor(
+                sensor_id=row["sensor_id"],
+                sensor_name=row["sensor_name"],
+                sensor_type=row["sensor_type"],
+                observation_point=row["observation_point"],
+                host=row["host"],
+                interface=row["interface"],
+                enabled=bool(row["enabled"]),
+                last_seen=row["last_seen"],
+                health_status=row["health_status"],
+                version=row["version"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"]
+            )
+
+
     # -------------------------------------------------------------
     # SECURITY EVENTS CRUD
     # -------------------------------------------------------------
@@ -1161,6 +1218,26 @@ class SecurityDatabaseMixin:
                 )
                 for r in rows
             ]
+
+    def get_integration_health(self, integration_name: str) -> Optional[IntegrationHealth]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM integration_health WHERE integration_name = ?", (integration_name,))
+            r = cursor.fetchone()
+            if not r:
+                return None
+            return IntegrationHealth(
+                integration_name=r["integration_name"],
+                connectivity=r["connectivity"],
+                last_successful_ingestion=r["last_successful_ingestion"],
+                last_event_timestamp=r["last_event_timestamp"],
+                processing_lag_ms=r["processing_lag_ms"],
+                error_count=r["error_count"],
+                queue_depth=r["queue_depth"],
+                last_error=r["last_error"],
+                configuration_status=r["configuration_status"],
+                updated_at=r["updated_at"]
+            )
 
     def update_integration_health(
         self,
