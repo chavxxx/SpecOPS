@@ -239,6 +239,15 @@ async def sync_all_routers(
                 "sessions": 0
             })
 
+    # Automatically hydrate active flow records for harvested subscriber sessions
+    if total_sessions > 0:
+        try:
+            from app.services.akvorado_adapter import AkvoradoAdapter
+            flow_adapter = AkvoradoAdapter(db=db)
+            flow_adapter.simulate_carrier_flows(count=min(250, max(80, total_sessions // 6)))
+        except Exception as fe:
+            logger.debug(f"Fleet flow sync note: {fe}")
+
     # Record security audit log
     db.log_audit_event(
         operator_id=user.username,

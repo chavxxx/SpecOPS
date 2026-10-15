@@ -27,6 +27,8 @@ class SecuritySettings(BaseModel):
     opensearch_url: str = "http://localhost:9200"
     opensearch_username: str = "admin"
     opensearch_password: Optional[str] = None
+    opensearch_mode: str = "auto" # auto, cluster, standalone
+    opensearch_verify_ssl: bool = False
     akvorado_url: str = "http://localhost:8080"
     notification_webhook_url: Optional[str] = None
     alert_cooldown_minutes: int = 15

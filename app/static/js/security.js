@@ -590,8 +590,10 @@ async function saveIncidentStatusUpdate() {
 // PAGE 6: TRAFFIC ANALYTICS (AKVORADO FLOWS)
 // ---------------------------------------------------------------------------
 async function loadTrafficAnalytics(isManual = false) {
-  const spinIcon = document.getElementById("sec-traffic-refresh-icon");
+  const refreshBtn = document.getElementById("btn-sec-traffic-refresh") || document.querySelector('button[onclick*="loadTrafficAnalytics"]');
+  const spinIcon = refreshBtn ? refreshBtn.querySelector("svg, i") : document.getElementById("sec-traffic-refresh-icon");
   if (spinIcon) spinIcon.classList.add("animate-spin");
+  if (refreshBtn) refreshBtn.disabled = true;
 
   try {
     const authHeaders = typeof getAuthHeaders === "function" ? getAuthHeaders() : {};
@@ -829,10 +831,18 @@ async function loadTrafficAnalytics(isManual = false) {
     }
   } catch (e) {
     console.error("Error loading traffic analytics:", e);
-    if (isManual && typeof showToast === "function") {
-      showToast("Failed to refresh traffic analytics: " + e.message, "error");
+    if (isManual) {
+      showSecurityToast("Failed to refresh traffic analytics: " + e.message, "error");
     }
   } finally {
+    const currentBtn = document.getElementById("btn-sec-traffic-refresh") || document.querySelector('button[onclick*="loadTrafficAnalytics"]');
+    if (currentBtn) {
+      currentBtn.disabled = false;
+      const allIcons = currentBtn.querySelectorAll("svg, i, .lucide-refresh-cw");
+      allIcons.forEach(ic => ic.classList.remove("animate-spin"));
+    }
+    const rawIcon = document.getElementById("sec-traffic-refresh-icon");
+    if (rawIcon) rawIcon.classList.remove("animate-spin");
     if (spinIcon) spinIcon.classList.remove("animate-spin");
   }
 }
@@ -1390,7 +1400,15 @@ async function loadSecuritySettings() {
     document.getElementById("sec-set-ac-host").value = data.ac_router_host || "";
     document.getElementById("sec-set-ac-user").value = data.ac_router_username || "";
 
-    document.getElementById("sec-set-opensearch-url").value = data.opensearch_url || "";
+    const osModeEl = document.getElementById("sec-set-opensearch-mode");
+    if (osModeEl) osModeEl.value = data.opensearch_mode || "auto";
+    const osUrlEl = document.getElementById("sec-set-opensearch-url");
+    if (osUrlEl) osUrlEl.value = data.opensearch_url || "http://localhost:9200";
+    const osUserEl = document.getElementById("sec-set-opensearch-user");
+    if (osUserEl) osUserEl.value = data.opensearch_username || "admin";
+    const osPassEl = document.getElementById("sec-set-opensearch-pass");
+    if (osPassEl) osPassEl.value = data.opensearch_password || "";
+
     document.getElementById("sec-set-webhook-url").value = data.notification_webhook_url || "";
     document.getElementById("sec-set-cooldown").value = data.alert_cooldown_minutes || 15;
   } catch (e) {
@@ -1415,7 +1433,10 @@ async function saveSecuritySettings(e) {
     ac_router_host: document.getElementById("sec-set-ac-host").value.trim(),
     ac_router_username: document.getElementById("sec-set-ac-user").value.trim(),
     ac_router_password: document.getElementById("sec-set-ac-pass")?.value || "********",
+    opensearch_mode: document.getElementById("sec-set-opensearch-mode")?.value || "auto",
     opensearch_url: document.getElementById("sec-set-opensearch-url").value.trim(),
+    opensearch_username: document.getElementById("sec-set-opensearch-user")?.value.trim() || "admin",
+    opensearch_password: document.getElementById("sec-set-opensearch-pass")?.value || "********",
     notification_webhook_url: document.getElementById("sec-set-webhook-url")?.value.trim() || null,
     alert_cooldown_minutes: parseInt(document.getElementById("sec-set-cooldown").value, 10)
   };
@@ -1430,7 +1451,7 @@ async function saveSecuritySettings(e) {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || "Save failed");
-    showSecurityToast("Settings saved successfully");
+    showSecurityToast("Settings saved successfully", "success");
   } catch (e) {
     alert("Error saving settings: " + e.message);
   }
