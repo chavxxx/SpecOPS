@@ -8,6 +8,56 @@ let currentTab = 'sec-overview';
 let currentUser = null;
 
 // ============================================================================
+// HIGH-PERFORMANCE UI & RENDERING OPTIMIZATIONS
+// ============================================================================
+window._clientDataCache = new Map();
+
+function getCachedData(key, maxAgeMs = 30000) {
+  const item = window._clientDataCache.get(key);
+  if (!item) return null;
+  if (Date.now() - item.ts > maxAgeMs) {
+    window._clientDataCache.delete(key);
+    return null;
+  }
+  return item.data;
+}
+
+function setCachedData(key, data) {
+  window._clientDataCache.set(key, { data, ts: Date.now() });
+}
+
+function clearClientCache(prefix = null) {
+  if (!prefix) {
+    window._clientDataCache.clear();
+    return;
+  }
+  for (const k of window._clientDataCache.keys()) {
+    if (k.startsWith(prefix)) window._clientDataCache.delete(k);
+  }
+}
+
+/**
+ * Scoped and debounced Lucide icon renderer.
+ * Eliminates full-DOM layout thrashing by scoping to container or debouncing via rAF.
+ */
+function renderIcons(target = null) {
+  if (!window.lucide || typeof lucide.createIcons !== 'function') return;
+  try {
+    if (target && target.nodeType === Node.ELEMENT_NODE) {
+      lucide.createIcons({ root: target });
+      return;
+    }
+    if (window._lucideRafId) cancelAnimationFrame(window._lucideRafId);
+    window._lucideRafId = requestAnimationFrame(() => {
+      lucide.createIcons();
+    });
+  } catch (err) {
+    // Graceful fallback
+  }
+}
+window.renderIcons = renderIcons;
+
+// ============================================================================
 // AUTHENTICATION & SESSION MANAGEMENT HELPERS
 // ============================================================================
 
@@ -174,7 +224,7 @@ function openModal(modalId) {
   if (m) {
     m.classList.remove('hidden');
     m.classList.add('flex');
-    if (window.lucide) lucide.createIcons();
+    renderIcons(m);
     const input = m.querySelector('input:not([type="hidden"]), select, textarea');
     if (input) setTimeout(() => input.focus(), 60);
   }
@@ -204,10 +254,12 @@ function switchTab(tabId) {
   });
 
   // 2. Hide all tab sections, show the target
+  let activeSec = null;
   document.querySelectorAll('main > section.tab-content').forEach(sec => {
     if (sec.id === `tab-${tabId}`) {
       sec.classList.remove('hidden');
       sec.classList.add('block', 'space-y-6');
+      activeSec = sec;
     } else {
       sec.classList.add('hidden');
       sec.classList.remove('block', 'space-y-6');
@@ -260,8 +312,10 @@ function switchTab(tabId) {
       break;
   }
 
-  if (window.lucide) {
-    lucide.createIcons();
+  if (activeSec) {
+    renderIcons(activeSec);
+  } else {
+    renderIcons();
   }
 }
 

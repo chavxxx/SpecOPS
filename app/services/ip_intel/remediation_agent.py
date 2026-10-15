@@ -108,108 +108,83 @@ class IPRemediationAgent:
                 f"/ip firewall address-list add list=specops_quarantine address={sub_ip} timeout=2d comment=\"SpecOPS: Quarantine abusive subscriber {attributed_sub.get('pppoe_username') or ''}\""
             )
 
-        # 5. Build Delisting Actions for major blacklists and anti-cheat engines
+        # 5. Discover & Compile Delisting Dossiers for all External Authorities
+        from app.services.ip_intel.authority_directory import AUTHORITY_CATALOG, get_authority_dossier
         delisting_actions: List[Dict[str, Any]] = []
 
-        # Spamhaus Delisting Portal
-        delisting_actions.append({
-            "id": f"delist-spamhaus-{job_id}",
-            "provider_id": "spamhaus_zen",
-            "provider_name": "Spamhaus ZEN / CBL",
-            "action_type": "web_portal",
-            "action_title": "Spamhaus IP Removal Portal",
-            "description": "Submit automatic self-service delisting after applying the MikroTik Port 25 firewall drop.",
-            "external_url": f"https://check.spamhaus.org/query/ip/{clean_ip}",
-            "prefilled_payload": {
-                "ip": clean_ip,
-                "reason": "Subscriber device secured. Outgoing TCP port 25 blocked on core CGNAT router.",
-                "contact": "noc@wispnet.ph"
-            },
-            "status": "ready"
-        })
-
-        # Barracuda BRBL Removal
-        delisting_actions.append({
-            "id": f"delist-barracuda-{job_id}",
-            "provider_id": "barracuda",
-            "provider_name": "Barracuda Reputation BRBL",
-            "action_type": "web_portal",
-            "action_title": "Barracuda Central IP Removal Request",
-            "description": "One-click submission to Barracuda Central automated unban queue.",
-            "external_url": f"https://www.barracudacentral.org/rbl/removal-request",
-            "prefilled_payload": {
-                "ip": clean_ip,
-                "email": "noc@wispnet.ph",
-                "explanation": "Outbound spam traffic eliminated via ISP CGNAT egress filtering."
-            },
-            "status": "ready"
-        })
-
-        # SpamCop Tracking
-        delisting_actions.append({
-            "id": f"delist-spamcop-{job_id}",
-            "provider_id": "spamcop",
-            "provider_name": "SpamCop Blocking List",
-            "action_type": "api_submit",
-            "action_title": "SpamCop Automatic Expiry Monitor",
-            "description": "SpamCop automatically clears IPs 24–48 hours after abusive traffic stops.",
-            "external_url": f"https://www.spamcop.net/w3m?action=checkblock&ip={clean_ip}",
-            "prefilled_payload": {"decay_window_hours": 24},
-            "status": "submitted"
-        })
-
-        # AbuseIPDB False Positive Dispute / Decay
-        delisting_actions.append({
-            "id": f"delist-abuseipdb-{job_id}",
-            "provider_id": "abuseipdb",
-            "provider_name": "AbuseIPDB",
-            "action_type": "web_portal",
-            "action_title": "AbuseIPDB IP History & Dispute",
-            "description": "Review distinct reporter breakdown and request dispute for false-positive CGNAT reports.",
-            "external_url": f"https://www.abuseipdb.com/check/{clean_ip}",
-            "prefilled_payload": {"ip": clean_ip},
-            "status": "ready"
-        })
-
-        # Reverse DNS / PTR Recommendation for Gaming Anti-Cheat
+        listed_prov_ids = {obs.get("provider_id") for obs in active_listings}
         reversed_ip = ".".join(reversed(clean_ip.split(".")))
         dash_ip = clean_ip.replace(".", "-")
         rdns_rec = f"{reversed_ip}.in-addr.arpa. IN PTR dynamic-{dash_ip}.wispnet.ph."
-
-        # RFC 8805 Geofeed Recommendation for Game Publishers (CODM/Garena/Activision)
         geofeed_entry = f"{clean_ip}/32,PH,PH-00,Manila,WISPnet Solutions,Wireless ISP"
 
-        delisting_actions.append({
-            "id": f"delist-gaming-{job_id}",
-            "provider_id": "gaming_compat",
-            "provider_name": "Online Gaming & Anti-Cheat Engine",
-            "action_type": "geofeed_update",
-            "action_title": "RFC 8805 Geofeed & PTR Validation",
-            "description": "Updates IP classification to 'Residential Wireless ISP' to resolve Call of Duty: Mobile and Vanguard bans.",
-            "external_url": "https://geofeeds.wispnet.ph/feed.csv",
-            "prefilled_payload": {
-                "geofeed_line": geofeed_entry,
-                "ptr_record": rdns_rec
-            },
-            "status": "ready"
-        })
+        # Check each authority in the catalog
+        for auth_id, auth_info in AUTHORITY_CATALOG.items():
+            dossier = get_authority_dossier(auth_id, clean_ip)
+            if not dossier:
+                continue
+
+            # Determine whether this specific authority currently flags this IP
+            is_blocking = False
+            if auth_id in listed_prov_ids:
+                is_blocking = True
+            elif "gaming" in auth_id and ("gaming_compat" in listed_prov_ids or any("gaming" in p for p in listed_prov_ids)):
+                is_blocking = True
+            elif auth_id == "cisco_talos" and "cisco_talos" in listed_prov_ids:
+                is_blocking = True
+            elif auth_id == "sorbs" and "sorbs" in listed_prov_ids:
+                is_blocking = True
+            elif auth_id == "uceprotect" and "uceprotect" in listed_prov_ids:
+                is_blocking = True
+
+            action_type = "web_portal"
+            if "gaming" in auth_id:
+                action_type = "geofeed_update"
+            elif dossier.get("email_contact") and not dossier.get("portal_url"):
+                action_type = "email_appeal"
+
+            delisting_actions.append({
+                "id": f"delist-{auth_id}-{job_id}",
+                "provider_id": auth_id,
+                "provider_name": dossier["name"],
+                "organization": dossier["organization"],
+                "category": dossier["category"],
+                "action_type": action_type,
+                "action_title": f"{dossier['organization']} Removal Portal",
+                "description": dossier["impact"],
+                "impact": dossier["impact"],
+                "external_url": dossier["portal_url"],
+                "email_contact": dossier["email_contact"],
+                "removal_sla": dossier["removal_sla"],
+                "requirements": dossier["requirements"],
+                "appeal_letter": dossier["appeal_letter"],
+                "is_blocking": is_blocking,
+                "status": "flagged" if is_blocking else "ready",
+                "prefilled_payload": {
+                    "ip": clean_ip,
+                    "reason": "ISP subscriber isolated; malicious egress blocked on core edge router.",
+                    "contact": "noc@wispnet.ph",
+                    "ptr_record": rdns_rec,
+                    "geofeed_entry": geofeed_entry
+                }
+            })
+
+        # Sort so all active blocking authorities appear first
+        delisting_actions.sort(key=lambda a: (not a["is_blocking"], a["category"]))
+
+        blocking_authorities = [a["provider_name"] for a in delisting_actions if a["is_blocking"]]
 
         # Initial Logs
         logs = [
             {
                 "timestamp": now,
                 "phase": "diagnostic",
-                "message": f"Agent initiated diagnostic for {clean_ip}. Identified vector: {dominant_vector}."
+                "message": f"Authority Delisting Agent engaged for {clean_ip}. Detected {len(blocking_authorities)} blocking authorities."
             },
             {
                 "timestamp": now,
-                "phase": "sanitization",
-                "message": f"Generated {len(sanitization_cmds) - 4} MikroTik egress firewall drop rules."
-            },
-            {
-                "timestamp": now,
-                "phase": "delisting",
-                "message": f"Prepared {len(delisting_actions)} delisting portal actions and RFC 8805 geofeed correction."
+                "phase": "delisting_dossier",
+                "message": f"Compiled {len(delisting_actions)} authority delisting procedures, official removal URLs, and formal NOC appeal letters."
             }
         ]
 
@@ -234,7 +209,7 @@ class IPRemediationAgent:
             action="create_remediation_job",
             target_type="ip",
             target_id=clean_ip,
-            details={"job_id": job_id, "dominant_vector": dominant_vector}
+            details={"job_id": job_id, "blocking_authorities": blocking_authorities}
         )
 
         job_data = self.db.get_remediation_job(job_id)

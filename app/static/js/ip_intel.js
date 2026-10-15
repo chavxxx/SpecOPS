@@ -780,7 +780,7 @@ async function loadIPIntelInventory() {
       </tr>
     `).join("");
 
-    if (window.lucide) lucide.createIcons();
+    renderIcons(tbody);
   } catch (e) {
     console.error("Inventory error:", e);
     if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-rose-400">Failed to load inventory: ${escapeHtml(e.message)}</td></tr>`;
@@ -1055,142 +1055,109 @@ function renderRemediationDetails(job) {
   const sub = job.attributed_subscriber;
   const sanitizationScript = (job.sanitization_commands || []).join("\n");
 
+  const blockingActions = (job.delisting_actions || []).filter(a => a.is_blocking);
+  const otherActions = (job.delisting_actions || []).filter(a => !a.is_blocking);
+  const totalBlocking = blockingActions.length;
+
   content.innerHTML = `
-    <!-- 1. ROOT CAUSE & INCIDENT DIAGNOSTICS -->
+    <!-- 1. DETECTED BLOCKING AUTHORITIES (ACTION REQUIRED) -->
     <div class="p-5 rounded-2xl bg-dark-800/90 border border-slate-700/80 space-y-4">
       <div class="flex items-center justify-between pb-3 border-b border-slate-700/60">
         <div class="flex items-center gap-2">
-          <i data-lucide="crosshair" class="w-4 h-4 text-amber-400"></i>
-          <h4 class="text-xs font-black uppercase tracking-wider text-white">Root-Cause Attribution & Abuse Profile</h4>
+          <i data-lucide="shield-alert" class="w-4 h-4 text-rose-400"></i>
+          <h4 class="text-xs font-black uppercase tracking-wider text-white">External Authorities Blocking This IP</h4>
         </div>
-        <span class="text-[11px] font-mono text-slate-400">Job ID: ${job.job_id}</span>
+        <span class="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
+          totalBlocking > 0 ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30 animate-pulse' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+        }">
+          ${totalBlocking > 0 ? `${totalBlocking} ACTIVE BLOCKLISTS` : 'NO ACTIVE BLOCKS'}
+        </span>
       </div>
 
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        <div class="p-3 rounded-xl bg-dark-850 border border-slate-700/60">
-          <div class="text-[10px] font-bold text-slate-400 uppercase">Dominant Vector</div>
-          <div class="text-xs font-bold text-rose-300 mt-1 truncate" title="${rca.dominant_vector || 'Mixed'}">${rca.dominant_vector || 'General Abuse'}</div>
-        </div>
-        <div class="p-3 rounded-xl bg-dark-850 border border-slate-700/60">
-          <div class="text-[10px] font-bold text-slate-400 uppercase">Active Blacklists</div>
-          <div class="text-xs font-bold text-white mt-1">${rca.active_listings_count || 0} Listed Providers</div>
-        </div>
-        <div class="p-3 rounded-xl bg-dark-850 border border-slate-700/60">
-          <div class="text-[10px] font-bold text-slate-400 uppercase">Suricata Alerts</div>
-          <div class="text-xs font-bold text-amber-300 mt-1">${rca.suricata_events_detected || 0} Intrusion Events</div>
-        </div>
-        <div class="p-3 rounded-xl bg-dark-850 border border-slate-700/60">
-          <div class="text-[10px] font-bold text-slate-400 uppercase">Flagged Ports</div>
-          <div class="text-xs font-bold font-mono text-cyan-300 mt-1">${(rca.abused_ports && rca.abused_ports.length) ? rca.abused_ports.join(', ') : 'None'}</div>
-        </div>
-      </div>
-
-      <!-- Subscriber Attribution Banner -->
-      ${sub ? `
-        <div class="p-3.5 rounded-xl bg-brand-950/40 border border-brand-500/40 space-y-2">
-          <div class="flex items-center justify-between text-xs font-bold text-brand-300">
-            <span class="flex items-center gap-1.5"><i data-lucide="user-check" class="w-4 h-4 text-emerald-400"></i> Deterministic CGNAT Subscriber Attribution</span>
-            <span class="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">${sub.attribution_status || 'VERIFIED'}</span>
+      ${totalBlocking > 0 ? `
+        <div class="space-y-3">
+          <div class="text-xs text-rose-300/90 leading-relaxed">
+            The following external authorities are currently blacklisting or restricting traffic from <strong>${job.ip_address}</strong>. Click the direct delisting portal for each authority below and submit the pre-formatted ISP appeal letter:
           </div>
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs pt-1">
-            <div>
-              <span class="text-[10px] text-slate-400 uppercase">Subscriber CGNAT IP:</span>
-              <div class="font-mono font-bold text-white">${sub.subscriber_cgnat_ip || '—'}</div>
-            </div>
-            <div>
-              <span class="text-[10px] text-slate-400 uppercase">PPPoE Username:</span>
-              <div class="font-mono font-bold text-indigo-300">${sub.pppoe_username || 'Unrecorded'}</div>
-            </div>
-            <div>
-              <span class="text-[10px] text-slate-400 uppercase">Allocated Port Block:</span>
-              <div class="font-mono font-bold text-cyan-300">${sub.allocated_port_block || '—'}</div>
-            </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+            ${blockingActions.map(action => {
+              const letter = action.appeal_letter || "";
+              return `
+                <div class="p-4 rounded-xl bg-rose-950/20 border border-rose-500/30 flex flex-col justify-between space-y-3.5">
+                  <div class="space-y-1.5">
+                    <div class="flex items-center justify-between gap-2">
+                      <span class="font-bold text-white text-xs flex items-center gap-1.5">
+                        <i data-lucide="alert-octagon" class="w-3.5 h-3.5 text-rose-400"></i>
+                        ${action.provider_name}
+                      </span>
+                      <span class="px-2 py-0.5 rounded text-[9px] font-black uppercase bg-rose-500/25 text-rose-300 border border-rose-500/30">
+                        LISTED
+                      </span>
+                    </div>
+                    <div class="text-[10px] uppercase font-semibold text-rose-300/80">${action.category || 'Reputation Authority'}</div>
+                    <p class="text-[11px] text-slate-300 leading-snug">${action.description || action.impact || ''}</p>
+                    
+                    ${action.removal_sla ? `
+                      <div class="text-[10px] text-amber-300 font-medium flex items-center gap-1 mt-1">
+                        <i data-lucide="clock" class="w-3 h-3 text-amber-400"></i> Expected SLA: ${action.removal_sla}
+                      </div>
+                    ` : ''}
+
+                    ${(action.requirements && action.requirements.length > 0) ? `
+                      <div class="mt-2 text-[10px] text-slate-400 space-y-0.5">
+                        <span class="font-bold text-slate-300">Authority Removal Criteria:</span>
+                        <ul class="list-disc pl-4 space-y-0.5 text-slate-400">
+                          ${action.requirements.map(r => `<li>${r}</li>`).join("")}
+                        </ul>
+                      </div>
+                    ` : ''}
+                  </div>
+
+                  <div class="flex items-center justify-between gap-2 pt-2.5 border-t border-rose-500/20">
+                    <button onclick="copyAppealLetter(\`${letter.replace(/`/g, '\\`').replace(/\\/g, '\\\\')}\`, '${action.provider_name.replace(/'/g, "\\'")}')" class="px-3 py-1.5 rounded-lg bg-dark-750 hover:bg-dark-700 text-slate-200 text-xs font-semibold border border-slate-650 flex items-center gap-1.5 transition-all shadow-sm" title="Copy formal removal petition">
+                      <i data-lucide="file-text" class="w-3.5 h-3.5 text-amber-400"></i> Copy Appeal Letter
+                    </button>
+                    ${action.external_url ? `
+                      <a href="${action.external_url}" target="_blank" rel="noopener noreferrer" class="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-brand-600/30 transition-all">
+                        <span>Delist on ${action.organization || 'Portal'}</span>
+                        <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
+                      </a>
+                    ` : ''}
+                  </div>
+                </div>
+              `;
+            }).join("")}
           </div>
         </div>
       ` : `
-        <div class="p-3 rounded-xl bg-dark-850 border border-slate-700/60 text-xs text-slate-400 flex items-start gap-2">
-          <i data-lucide="info" class="w-4 h-4 text-slate-400 shrink-0 mt-0.5"></i>
-          <span>Public CGNAT address shared across subscribers. To pinpoint the exact customer, ensure the outbound abuse report contains the observed source port.</span>
+        <div class="p-4 rounded-xl bg-emerald-950/30 border border-emerald-500/30 text-emerald-300 flex items-center gap-3">
+          <i data-lucide="check-circle-2" class="w-5 h-5 text-emerald-400 shrink-0"></i>
+          <div>
+            <div class="text-xs font-bold text-white">No Active External Blocklists Detected</div>
+            <div class="text-xs text-emerald-300/90 mt-0.5">All monitored RBLs, spam filters, and reputation authorities report that ${job.ip_address} is clean.</div>
+          </div>
         </div>
       `}
     </div>
 
-    <!-- 2. MIKROTIK FIREWALL SANITIZATION RULES -->
-    <div class="p-5 rounded-2xl bg-dark-800/90 border border-slate-700/80 space-y-3">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <i data-lucide="terminal" class="w-4 h-4 text-emerald-400"></i>
-          <h4 class="text-xs font-black uppercase tracking-wider text-white">Core RouterOS Traffic Sanitization Rules</h4>
-        </div>
-        <button onclick="copyToClipboard(\`${sanitizationScript.replace(/`/g, '\\`').replace(/\\/g, '\\\\')}\`, 'MikroTik Sanitization Script')" class="px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-xs font-bold flex items-center gap-1.5 transition-all">
-          <i data-lucide="copy" class="w-3.5 h-3.5"></i> Copy RouterOS Rules
-        </button>
-      </div>
-      <p class="text-xs text-slate-400 leading-relaxed">
-        Apply these rules on your MikroTik core router to terminate ongoing malicious egress traffic. Delisting requests submitted while traffic is actively leaking will be rejected or immediately re-flagged.
-      </p>
-      <pre class="p-3.5 rounded-xl bg-dark-900 border border-slate-800 font-mono text-[11px] text-emerald-300/90 overflow-x-auto whitespace-pre-wrap">${sanitizationScript}</pre>
-    </div>
-
-    <!-- 3. GUIDED DELISTING ACTIONS & PORTALS -->
-    <div class="p-5 rounded-2xl bg-dark-800/90 border border-slate-700/80 space-y-3">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <i data-lucide="send" class="w-4 h-4 text-indigo-400"></i>
-          <h4 class="text-xs font-black uppercase tracking-wider text-white">Direct Delisting Portals & Justification Templates</h4>
-        </div>
-        <span class="text-xs text-slate-400">${(job.delisting_actions || []).length} Remediation Actions</span>
-      </div>
-
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-        ${(job.delisting_actions || []).map(action => {
-          const reasonText = (action.prefilled_payload && (action.prefilled_payload.reason || action.prefilled_payload.explanation)) || "Subscriber host secured; outbound abuse filtering applied on ISP router.";
-          return `
-            <div class="p-4 rounded-xl bg-dark-850 border border-slate-700/60 flex flex-col justify-between space-y-3">
-              <div>
-                <div class="flex items-center justify-between gap-2">
-                  <div class="font-bold text-white text-xs">${action.provider_name}</div>
-                  <span class="px-2 py-0.5 rounded text-[9px] font-black uppercase ${action.status === 'submitted' ? 'bg-indigo-500/20 text-indigo-300' : 'bg-emerald-500/20 text-emerald-300'}">
-                    ${action.status}
-                  </span>
-                </div>
-                <div class="text-[11px] font-semibold text-slate-300 mt-1">${action.action_title}</div>
-                <p class="text-[11px] text-slate-400 mt-1 leading-snug">${action.description}</p>
-              </div>
-
-              <div class="flex items-center justify-between gap-2 pt-2 border-t border-slate-700/60">
-                <button onclick="copyJustificationText('${reasonText.replace(/'/g, "\\'")}', '${action.provider_name}')" class="px-2.5 py-1 rounded bg-dark-750 hover:bg-dark-700 text-slate-300 text-[11px] font-semibold border border-slate-650 flex items-center gap-1 transition-all" title="Copy prefilled removal justification">
-                  <i data-lucide="clipboard" class="w-3 h-3 text-amber-400"></i> Copy Justification
-                </button>
-                ${action.external_url ? `
-                  <a href="${action.external_url}" target="_blank" rel="noopener noreferrer" class="px-3 py-1 rounded bg-brand-600/30 hover:bg-brand-600/50 text-brand-300 border border-brand-500/30 text-[11px] font-bold flex items-center gap-1 transition-all">
-                    <span>Delist Portal</span>
-                    <i data-lucide="external-link" class="w-3 h-3"></i>
-                  </a>
-                ` : ''}
-              </div>
-            </div>
-          `;
-        }).join("")}
-      </div>
-    </div>
-
-    <!-- 4. REVERSE DNS & RFC 8805 GEOFEED (GAMING ANTI-CHEAT COMPATIBILITY) -->
-    <div class="p-5 rounded-2xl bg-dark-800/90 border border-slate-700/80 space-y-3">
-      <div class="flex items-center justify-between">
+    <!-- 2. ONLINE GAMING & ANTI-CHEAT APPEAL CENTER (CODM / VANGUARD / MLBB) -->
+    <div class="p-5 rounded-2xl bg-dark-800/90 border border-slate-700/80 space-y-3.5">
+      <div class="flex items-center justify-between pb-2 border-b border-slate-700/60">
         <div class="flex items-center gap-2">
           <i data-lucide="gamepad-2" class="w-4 h-4 text-emerald-400"></i>
-          <h4 class="text-xs font-black uppercase tracking-wider text-white">Reverse DNS (PTR) & RFC 8805 Geofeed (Gaming & Anti-Cheat Appeal)</h4>
+          <h4 class="text-xs font-black uppercase tracking-wider text-white">Online Gaming & Anti-Cheat Appeal Center</h4>
         </div>
+        <span class="text-[11px] text-slate-400 font-medium">CODM Garena, Activision, Riot Vanguard, MLBB</span>
       </div>
       <p class="text-xs text-slate-400 leading-relaxed">
-        Online games (Call of Duty: Mobile, Valorant Vanguard, Mobile Legends) and publisher anti-cheats restrict IPs that lack PTR records or have misattributed geolocation.
+        Online game publishers (Activision Demonware, Garena Anti-Hack, Riot Vanguard) automatically flag residential IPs that lack compliant Reverse DNS or have incorrect country metadata.
       </p>
 
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
         <div class="p-3.5 rounded-xl bg-dark-850 border border-slate-700/60 space-y-2">
           <div class="flex items-center justify-between">
-            <span class="text-[10px] font-bold text-slate-400 uppercase">Recommended DNS PTR Record</span>
+            <span class="text-[10px] font-bold text-slate-400 uppercase">Recommended DNS PTR Record (Reverse DNS)</span>
             <button onclick="copyToClipboard('${job.rdns_recommendation || ''}', 'Reverse DNS Record')" class="p-1 hover:text-white text-slate-400">
               <i data-lucide="copy" class="w-3.5 h-3.5"></i>
             </button>
@@ -1210,24 +1177,65 @@ function renderRemediationDetails(job) {
       </div>
     </div>
 
-    <!-- 5. AUTONOMOUS CLEAN VERIFICATION -->
+    <!-- 3. COMPREHENSIVE GLOBAL AUTHORITY DIRECTORY & DELISTING PORTALS -->
+    <div class="p-5 rounded-2xl bg-dark-800/90 border border-slate-700/80 space-y-3">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <i data-lucide="book-open" class="w-4 h-4 text-indigo-400"></i>
+          <h4 class="text-xs font-black uppercase tracking-wider text-white">Global Authority Delisting Directory & Appeal Forms</h4>
+        </div>
+        <span class="text-xs text-slate-400">${otherActions.length} Clean Authorities Available</span>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
+        ${otherActions.map(action => {
+          const letter = action.appeal_letter || "";
+          return `
+            <div class="p-3.5 rounded-xl bg-dark-850 border border-slate-700/50 flex flex-col justify-between space-y-2.5">
+              <div>
+                <div class="flex items-center justify-between gap-1.5">
+                  <span class="font-bold text-white text-xs truncate" title="${action.provider_name}">${action.provider_name}</span>
+                  <span class="px-1.5 py-0.5 rounded text-[8px] font-black uppercase bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Clean</span>
+                </div>
+                <div class="text-[10px] text-slate-400 mt-0.5">${action.category}</div>
+                <div class="text-[10px] text-slate-500 mt-1">SLA: ${action.removal_sla || 'Standard'}</div>
+              </div>
+
+              <div class="flex items-center justify-between gap-1.5 pt-2 border-t border-slate-750">
+                <button onclick="copyAppealLetter(\`${letter.replace(/`/g, '\\`').replace(/\\/g, '\\\\')}\`, '${action.provider_name.replace(/'/g, "\\'")}')" class="px-2 py-1 rounded bg-dark-750 hover:bg-dark-700 text-slate-300 text-[10px] font-semibold border border-slate-650 flex items-center gap-1 transition-all" title="Copy formal removal petition">
+                  <i data-lucide="file-text" class="w-3 h-3 text-amber-400"></i> Letter
+                </button>
+                ${action.external_url ? `
+                  <a href="${action.external_url}" target="_blank" rel="noopener noreferrer" class="px-2.5 py-1 rounded bg-dark-700 hover:bg-dark-600 text-slate-200 text-[10px] font-bold border border-slate-600 flex items-center gap-1 transition-all">
+                    <span>Portal</span>
+                    <i data-lucide="external-link" class="w-2.5 h-2.5"></i>
+                  </a>
+                ` : ''}
+              </div>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    </div>
+
+    <!-- 4. AUTONOMOUS CLEAN VERIFICATION -->
     <div class="p-5 rounded-2xl bg-dark-800/90 border border-slate-700/80 space-y-4">
       <div class="flex items-center justify-between">
         <div>
           <h4 class="text-xs font-black uppercase tracking-wider text-white flex items-center gap-2">
-            <i data-lucide="check-circle" class="w-4 h-4 text-emerald-400"></i> Autonomous Clean Verification
+            <i data-lucide="check-circle" class="w-4 h-4 text-emerald-400"></i> Authority Delisting Verification
           </h4>
-          <p class="text-xs text-slate-400 mt-0.5">Rescans all blacklist providers to verify delisting completion and unbans.</p>
+          <p class="text-xs text-slate-400 mt-0.5">Re-scans all external blocklists and DNSBL authorities to verify that your IP has been officially removed.</p>
         </div>
         <button id="btn-remediation-verify" onclick="verifyRemediationClean('${job.job_id}')" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg shadow-emerald-600/30 flex items-center gap-2 transition-all">
-          <i data-lucide="shield-check" class="w-4 h-4"></i> Verify Clean Status Now
+          <i data-lucide="shield-check" class="w-4 h-4"></i> Verify Delisting from Authorities Now
         </button>
       </div>
 
       <div id="remediation-verify-result" class="hidden"></div>
     </div>
 
-    <!-- 6. AGENT AUDIT LOGS -->
+    <!-- 5. AGENT AUDIT LOGS -->
     <div class="p-4 rounded-xl bg-dark-850 border border-slate-800 space-y-2">
       <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Agent Action History</div>
       <div class="space-y-1 max-h-32 overflow-y-auto">
@@ -1241,7 +1249,7 @@ function renderRemediationDetails(job) {
     </div>
   `;
 
-  if (window.lucide) lucide.createIcons();
+  renderIcons(content);
 }
 
 async function verifyRemediationClean(jobId) {
@@ -1302,10 +1310,15 @@ async function verifyRemediationClean(jobId) {
   } finally {
     btn.disabled = false;
     btn.innerHTML = originalHtml;
-    if (window.lucide) lucide.createIcons();
+    renderIcons();
   }
 }
 
 function copyJustificationText(text, providerName) {
   copyToClipboard(text, `${providerName} Justification`);
+}
+
+function copyAppealLetter(text, authName) {
+  copyToClipboard(text, `${authName} Appeal Letter`);
+  showIntelToast(`Copied official appeal letter for ${authName}!`);
 }

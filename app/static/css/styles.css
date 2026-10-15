@@ -108,3 +108,44 @@
 .live-pulse {
   animation: pulse-ring 2s infinite ease-in-out;
 }
+
+/* ============================================================================
+   UI PERFORMANCE & RESPONSIVENESS ENHANCEMENTS
+   ============================================================================ */
+/* Virtualize / accelerate long tables */
+table {
+  contain: layout style;
+}
+
+table tbody tr {
+  contain: layout style paint;
+}
+
+/* Fast GPU composite for active modals and cards */
+.metric-card, .tab-btn {
+  will-change: transform;
+  backface-visibility: hidden;
+}
+
+/* Smooth tab switching without reflow jumps */
+main > section.tab-content {
+  animation: tabFadeIn 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes tabFadeIn {
+  from {
+    opacity: 0.85;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* High-speed scrollbars */
+* {
+  scrollbar-color: #334155 #0b0f19;
+  scrollbar-width: thin;
+}
+

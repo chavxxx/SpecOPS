@@ -286,12 +286,20 @@ class RemediationActionItem(BaseModel):
     id: str
     provider_id: str
     provider_name: str
-    action_type: str            # web_portal, api_submit, geofeed_update, dns_ptr, firewall_rule
+    organization: Optional[str] = None
+    category: Optional[str] = None
+    action_type: str = "web_portal"            # web_portal, email_appeal, geofeed_update, dns_ptr
     action_title: str
     description: str
+    impact: Optional[str] = None
     external_url: Optional[str] = None
+    email_contact: Optional[str] = None
+    removal_sla: Optional[str] = None
+    requirements: List[str] = []
+    appeal_letter: Optional[str] = None
+    is_blocking: bool = False
+    status: str = "ready"     # flagged, ready, submitted, verified
     prefilled_payload: Optional[Dict[str, Any]] = None
-    status: str = "pending"     # pending, ready, submitted, verified
 
 class RemediationJobCreate(BaseModel):
     ip_address: str
@@ -303,6 +311,8 @@ class RemediationJobResponse(BaseModel):
     ip_address: str
     status: RemediationJobStatus
     progress_percent: float = 0.0
+    blocking_authorities_count: int = 0
+    blocking_authorities: List[str] = []
     root_cause_analysis: Dict[str, Any] = {}
     attributed_subscriber: Optional[Dict[str, Any]] = None
     sanitization_commands: List[str] = []

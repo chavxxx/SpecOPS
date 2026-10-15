@@ -1129,6 +1129,9 @@ class IPIntelDatabaseMixin:
             d["sanitization_commands"] = json.loads(d.get("sanitization_commands_json") or "[]")
             d["delisting_actions"] = json.loads(d.get("delisting_actions_json") or "[]")
             d["logs"] = json.loads(d.get("logs_json") or "[]")
+            blocking = [a.get("provider_name") for a in d["delisting_actions"] if a.get("is_blocking")]
+            d["blocking_authorities_count"] = len(blocking)
+            d["blocking_authorities"] = blocking
             return d
 
     def list_remediation_jobs(
@@ -1162,6 +1165,9 @@ class IPIntelDatabaseMixin:
                 d["sanitization_commands"] = json.loads(d.get("sanitization_commands_json") or "[]")
                 d["delisting_actions"] = json.loads(d.get("delisting_actions_json") or "[]")
                 d["logs"] = json.loads(d.get("logs_json") or "[]")
+                blocking = [a.get("provider_name") for a in d["delisting_actions"] if a.get("is_blocking")]
+                d["blocking_authorities_count"] = len(blocking)
+                d["blocking_authorities"] = blocking
                 results.append(d)
             return results
 
