@@ -259,6 +259,34 @@ class SecurityDatabaseMixin:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_opensearch_queue_status ON opensearch_queue (status, attempts);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_raw_events_eid ON raw_events (event_id);")
 
+        # 13. Onboarded Routers (Core, AC, Border, Distribution, etc.)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS routers (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'core',
+                host TEXT NOT NULL,
+                port INTEGER NOT NULL DEFAULT 8728,
+                username TEXT NOT NULL DEFAULT 'security_ro',
+                password TEXT NOT NULL,
+                use_ssl INTEGER DEFAULT 0,
+                use_rest INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'untested',
+                model TEXT,
+                ros_version TEXT,
+                cpu_load INTEGER,
+                uptime TEXT,
+                last_seen TIMESTAMP,
+                last_error TEXT,
+                notes TEXT DEFAULT '',
+                enabled INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_routers_role ON routers (role);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_routers_status ON routers (status);")
+
         # Seed default sensors & default detection rules if not existing
         self._seed_default_security_entities(cursor)
 
@@ -294,6 +322,19 @@ class SecurityDatabaseMixin:
                 INSERT INTO detection_rules (rule_id, name, category, enabled, threshold_config_json, time_window_seconds, severity, exclusions_json, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], now, now) for r in default_rules])
+
+        # Default routers (Core CCR2116 & PPPoE AC CCR2116)
+        cursor.execute("SELECT COUNT(*) FROM routers")
+        if cursor.fetchone()[0] == 0:
+            now = get_utc_now_iso()
+            default_routers = [
+                ("router-core-ccr2116", "Core CCR2116 NAT Gateway", "core", "100.91.0.1", 8728, "security_ro", "********", 0, 0, "online", "CCR2116-12G-4S+", "v7.16", 14, "42d 18h", now, None, "Carrier CGNAT & BGP Core Gateway", 1, now, now),
+                ("router-ac-ccr2116", "PPPoE AC CCR2116", "ac", "100.91.0.254", 8728, "security_ro", "********", 0, 0, "online", "CCR2116-12G-4S+", "v7.16", 22, "42d 18h", now, None, "Primary PPPoE / IPoE Access Concentrator", 1, now, now)
+            ]
+            cursor.executemany("""
+                INSERT INTO routers (id, name, role, host, port, username, password, use_ssl, use_rest, status, model, ros_version, cpu_load, uptime, last_seen, last_error, notes, enabled, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, default_routers)
 
         # Default Integration Health entries
         cursor.execute("SELECT COUNT(*) FROM integration_health")
@@ -1226,6 +1267,27 @@ class SecurityDatabaseMixin:
             """, (audit_id, operator_id, action, target_type, target_id, now, source_ip, outcome, det_json))
             conn.commit()
 
+    def log_audit_event(
+        self,
+        operator_id: str,
+        action: str,
+        target_type: str,
+        target_id: Optional[str] = None,
+        source_ip: Optional[str] = None,
+        outcome: str = "success",
+        details: Optional[Dict[str, Any]] = None,
+        sanitized_details: Optional[Dict[str, Any]] = None,
+    ):
+        return self.log_security_audit(
+            operator_id=operator_id,
+            action=action,
+            target_type=target_type,
+            target_id=target_id,
+            source_ip=source_ip,
+            outcome=outcome,
+            sanitized_details=sanitized_details or details or {}
+        )
+
     def get_security_audit_logs(self, limit: int = 100, offset: int = 0) -> Tuple[List[AuditLogEntry], int]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -1384,3 +1446,135 @@ class SecurityDatabaseMixin:
             """, (key, json.dumps(value)))
             conn.commit()
             return True
+
+    # -------------------------------------------------------------
+    # ROUTER MANAGEMENT & ONBOARDING METHODS
+    # -------------------------------------------------------------
+    def get_routers(self, role: Optional[str] = None) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if role and role.lower() != "all":
+                cursor.execute("""
+                    SELECT id, name, role, host, port, username, use_ssl, use_rest,
+                           status, model, ros_version, cpu_load, uptime, last_seen, last_error, notes, enabled, created_at, updated_at
+                    FROM routers WHERE role = ? ORDER BY created_at ASC
+                """, (role.lower(),))
+            else:
+                cursor.execute("""
+                    SELECT id, name, role, host, port, username, use_ssl, use_rest,
+                           status, model, ros_version, cpu_load, uptime, last_seen, last_error, notes, enabled, created_at, updated_at
+                    FROM routers ORDER BY created_at ASC
+                """)
+            cols = [col[0] for col in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+    def get_router(self, router_id: str, include_password: bool = False) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if include_password:
+                cursor.execute("SELECT * FROM routers WHERE id = ?", (router_id,))
+            else:
+                cursor.execute("""
+                    SELECT id, name, role, host, port, username, use_ssl, use_rest,
+                           status, model, ros_version, cpu_load, uptime, last_seen, last_error, notes, enabled, created_at, updated_at
+                    FROM routers WHERE id = ?
+                """, (router_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            cols = [col[0] for col in cursor.description]
+            return dict(zip(cols, row))
+
+    def create_router(self, router_data: Dict[str, Any]) -> str:
+        router_id = router_data.get("id") or f"router-{uuid.uuid4().hex[:8]}"
+        now = get_utc_now_iso()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO routers (
+                    id, name, role, host, port, username, password, use_ssl, use_rest,
+                    status, model, ros_version, cpu_load, uptime, last_seen, last_error, notes, enabled, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                router_id,
+                router_data["name"],
+                router_data.get("role", "core"),
+                router_data["host"],
+                router_data.get("port", 8728),
+                router_data.get("username", "security_ro"),
+                router_data["password"],
+                1 if router_data.get("use_ssl") else 0,
+                1 if router_data.get("use_rest") else 0,
+                router_data.get("status", "untested"),
+                router_data.get("model"),
+                router_data.get("ros_version"),
+                router_data.get("cpu_load"),
+                router_data.get("uptime"),
+                router_data.get("last_seen"),
+                router_data.get("last_error"),
+                router_data.get("notes", ""),
+                1 if router_data.get("enabled", True) else 0,
+                now, now
+            ))
+            conn.commit()
+            return router_id
+
+    def update_router(self, router_id: str, updates: Dict[str, Any]) -> bool:
+        allowed = ["name", "role", "host", "port", "username", "password", "use_ssl", "use_rest", "notes", "enabled"]
+        query_parts = []
+        params = []
+        for k, v in updates.items():
+            if k in allowed and v is not None:
+                if k in ["use_ssl", "use_rest", "enabled"]:
+                    query_parts.append(f"{k} = ?")
+                    params.append(1 if v else 0)
+                else:
+                    query_parts.append(f"{k} = ?")
+                    params.append(v)
+        if not query_parts:
+            return False
+
+        query_parts.append("updated_at = CURRENT_TIMESTAMP")
+        params.append(router_id)
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(f"UPDATE routers SET {', '.join(query_parts)} WHERE id = ?", params)
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_router(self, router_id: str) -> bool:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM routers WHERE id = ?", (router_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def update_router_telemetry(
+        self,
+        router_id: str,
+        status: str,
+        model: Optional[str] = None,
+        ros_version: Optional[str] = None,
+        cpu_load: Optional[int] = None,
+        uptime: Optional[str] = None,
+        last_error: Optional[str] = None
+    ) -> bool:
+        now = get_utc_now_iso()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE routers SET
+                    status = ?,
+                    model = COALESCE(?, model),
+                    ros_version = COALESCE(?, ros_version),
+                    cpu_load = COALESCE(?, cpu_load),
+                    uptime = COALESCE(?, uptime),
+                    last_seen = ?,
+                    last_error = ?,
+                    updated_at = ?
+                WHERE id = ?
+            """, (status, model, ros_version, cpu_load, uptime, now if status == 'online' else None, last_error, now, router_id))
+            conn.commit()
+            return cursor.rowcount > 0
+

@@ -264,3 +264,74 @@ class IntegrationHealth(BaseModel):
     last_error: Optional[str] = None
     configuration_status: str = "configured"
     updated_at: Optional[str] = None
+
+# -------------------------------------------------------------
+# ROUTER ONBOARDING & MANAGEMENT SCHEMAS
+# -------------------------------------------------------------
+
+class RouterRole(str, Enum):
+    CORE = "core"                     # Core CGNAT / NAT444 / BGP Transit
+    AC = "ac"                         # PPPoE Access Concentrator / IPoE Gateway
+    BORDER = "border"                 # Transit Edge / Peering Router
+    DISTRIBUTION = "distribution"     # Aggregation / Mid-haul Router
+    CPE = "cpe"                       # Customer Edge / Fixed Wireless CPE
+    OTHER = "other"                   # Generic Network Appliance
+
+class RouterStatus(str, Enum):
+    ONLINE = "online"
+    OFFLINE = "offline"
+    DEGRADED = "degraded"
+    UNTESTED = "untested"
+
+class RouterBase(BaseModel):
+    name: str = Field(..., description="Human-friendly router identifier")
+    role: RouterRole = Field(default=RouterRole.CORE, description="Operational role in ISP architecture")
+    host: str = Field(..., description="IP address or FQDN")
+    port: int = Field(default=8728, description="API port (8728 api, 8729 api-ssl, 80/443 rest)")
+    username: str = Field(default="security_ro", description="Read-only API username")
+    use_ssl: bool = Field(default=False, description="Use TLS/SSL encryption for API connection")
+    use_rest: bool = Field(default=False, description="Use RouterOS v7 REST API instead of binary API")
+    notes: Optional[str] = Field(default="", description="Operator notes or rack location")
+    enabled: bool = Field(default=True, description="Whether monitoring is enabled")
+
+class RouterCreate(RouterBase):
+    password: str = Field(..., description="Router API user password")
+
+class RouterUpdate(BaseModel):
+    name: Optional[str] = None
+    role: Optional[RouterRole] = None
+    host: Optional[str] = None
+    port: Optional[int] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+    use_ssl: Optional[bool] = None
+    use_rest: Optional[bool] = None
+    notes: Optional[str] = None
+    enabled: Optional[bool] = None
+
+class Router(RouterBase):
+    id: str
+    status: RouterStatus = RouterStatus.UNTESTED
+    model: Optional[str] = None
+    ros_version: Optional[str] = None
+    cpu_load: Optional[int] = None
+    uptime: Optional[str] = None
+    last_seen: Optional[str] = None
+    last_error: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+class RouterTestResult(BaseModel):
+    online: bool
+    router_id: str
+    name: str
+    role: str
+    host: str
+    port: int
+    model: Optional[str] = None
+    ros_version: Optional[str] = None
+    cpu_load: Optional[int] = None
+    uptime: Optional[str] = None
+    error: Optional[str] = None
+    latency_ms: Optional[float] = None
+

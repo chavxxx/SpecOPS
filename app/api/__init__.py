@@ -15,6 +15,8 @@ from app.api.traffic import router as traffic_router
 from app.api.security_settings import router as security_settings_router
 from app.api.audit import router as audit_router
 from app.api.ip_intel import router as ip_intel_router
+from app.api.routers import router as routers_router
+from app.api.system import router as system_router
 
 api_router = APIRouter(prefix="/api")
 
@@ -46,10 +48,16 @@ api_router.include_router(traffic_router)
 # Security & Router Settings
 api_router.include_router(security_settings_router)
 
+# Router Onboarding & Hardware Management
+api_router.include_router(routers_router)
+
 # Security Audit Logs
 api_router.include_router(audit_router)
 
 # IP Reputation & Blacklist Intelligence
 api_router.include_router(ip_intel_router)
+
+# System & GitHub Updates
+api_router.include_router(system_router)
 
 __all__ = ["api_router"]

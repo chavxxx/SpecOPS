@@ -73,6 +73,13 @@
           <span id="ws-status-text" class="text-slate-300 font-mono">Live Defense Core</span>
         </div>
 
+        <!-- App Update Pill -->
+        <div id="system-update-pill" onclick="openUpdateModal()" title="Check SpecOPS System Updates (chavxxx/SpecOPS)" class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-dark-800 border border-slate-700/80 hover:border-cyan-500/50 hover:bg-dark-750 cursor-pointer transition-all text-xs">
+          <i data-lucide="git-branch" class="w-3.5 h-3.5 text-cyan-400"></i>
+          <span id="system-version-text" class="font-mono text-slate-300">v1.2.0</span>
+          <span id="system-update-badge" class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-700 text-slate-300 border border-slate-600">CHECK</span>
+        </div>
+
         <!-- Auth User Profile Pill (Click to open User Management) -->
         <div id="auth-user-pill" onclick="handleAuthPillClick()" title="User Account — Click to Manage Users" class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-dark-800 border border-slate-700/80 hover:border-brand-500/50 hover:bg-dark-750 cursor-pointer transition-all text-xs">
           <i data-lucide="shield-check" id="auth-icon" class="w-3.5 h-3.5 text-brand-400"></i>
@@ -129,6 +136,10 @@
       </button>
       <button onclick="switchTab('sec-settings')" class="tab-btn" data-tab="sec-settings">
         <i data-lucide="settings-2" class="w-4 h-4 text-slate-400"></i> Security Settings
+      </button>
+      <button onclick="switchTab('sec-routers')" class="tab-btn" data-tab="sec-routers" id="nav-tab-sec-routers">
+        <i data-lucide="router" class="w-4 h-4 text-cyan-400"></i> Routers &amp; Onboarding
+        <span id="badge-routers-count" class="tab-badge">2</span>
       </button>
       <span class="w-px h-6 bg-slate-800 self-center hidden sm:block"></span>
       <button onclick="switchTab('ip-intel')" class="tab-btn" data-tab="ip-intel" id="nav-tab-ip-intel">
@@ -896,6 +907,115 @@
     </section>
 
     <!-- ========================================================= -->
+    <!-- TAB: MIKROTIK ROUTER ONBOARDING & FLEET -->
+    <!-- ========================================================= -->
+    <section id="tab-sec-routers" class="tab-content hidden space-y-6">
+      <!-- Header & Action -->
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-dark-850 p-6 rounded-2xl border border-slate-800 shadow-xl">
+        <div class="space-y-1">
+          <h2 class="text-lg font-bold text-white flex items-center gap-2">
+            <i data-lucide="router" class="w-5 h-5 text-cyan-400"></i> MikroTik Router Fleet &amp; Onboarding
+          </h2>
+          <p class="text-xs text-slate-400">Onboard, configure credentials, monitor hardware metrics, and harvest active subscriber sessions across Carrier Core, PPPoE Access Concentrators, BGP Transit Edges, and Distribution Routers.</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="loadRouters()" class="px-3.5 py-2 rounded-xl bg-dark-800 hover:bg-dark-750 border border-slate-700 text-slate-200 text-xs font-semibold shadow flex items-center gap-1.5 active:scale-95 transition-all">
+            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Refresh
+          </button>
+          <button onclick="openOnboardRouterModal()" class="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold shadow-lg shadow-cyan-600/30 flex items-center gap-2 active:scale-95 transition-all">
+            <i data-lucide="plus" class="w-4 h-4"></i> Onboard Router
+          </button>
+        </div>
+      </div>
+
+      <!-- Top Fleet Metrics -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="p-4 rounded-xl bg-dark-850 border border-slate-800 space-y-1">
+          <div class="flex items-center justify-between text-xs text-slate-400 font-semibold">
+            <span>Total Fleet Routers</span>
+            <i data-lucide="server" class="w-4 h-4 text-slate-400"></i>
+          </div>
+          <div class="text-2xl font-black text-white font-mono" id="stat-routers-total">0</div>
+          <div class="text-[11px] text-slate-500">Monitored MikroTik hardware</div>
+        </div>
+
+        <div class="p-4 rounded-xl bg-dark-850 border border-purple-500/30 bg-gradient-to-br from-purple-950/20 to-dark-850 space-y-1">
+          <div class="flex items-center justify-between text-xs text-purple-400 font-semibold">
+            <span>Core CGNAT / BGP</span>
+            <i data-lucide="cpu" class="w-4 h-4 text-purple-400"></i>
+          </div>
+          <div class="text-2xl font-black text-purple-300 font-mono" id="stat-routers-core">0</div>
+          <div class="text-[11px] text-purple-400/70">Carrier NAT &amp; upstream routing</div>
+        </div>
+
+        <div class="p-4 rounded-xl bg-dark-850 border border-blue-500/30 bg-gradient-to-br from-blue-950/20 to-dark-850 space-y-1">
+          <div class="flex items-center justify-between text-xs text-blue-400 font-semibold">
+            <span>PPPoE Concentrators (AC)</span>
+            <i data-lucide="network" class="w-4 h-4 text-blue-400"></i>
+          </div>
+          <div class="text-2xl font-black text-blue-300 font-mono" id="stat-routers-ac">0</div>
+          <div class="text-[11px] text-blue-400/70">Subscriber session terminators</div>
+        </div>
+
+        <div class="p-4 rounded-xl bg-dark-850 border border-emerald-500/30 bg-gradient-to-br from-emerald-950/20 to-dark-850 space-y-1">
+          <div class="flex items-center justify-between text-xs text-emerald-400 font-semibold">
+            <span>Live &amp; Reachable</span>
+            <i data-lucide="check-circle-2" class="w-4 h-4 text-emerald-400"></i>
+          </div>
+          <div class="text-2xl font-black text-emerald-400 font-mono" id="stat-routers-online">0</div>
+          <div class="text-[11px] text-emerald-400/70">API / REST telemetry responsive</div>
+        </div>
+      </div>
+
+      <!-- Role Filter Pills -->
+      <div class="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none" id="router-role-filters">
+        <button onclick="filterRoutersByRole('all')" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-dark-750 text-white border border-slate-700 router-role-filter active" data-role="all">All Roles</button>
+        <button onclick="filterRoutersByRole('core')" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-dark-850 text-slate-300 hover:text-white border border-slate-800 router-role-filter" data-role="core">
+          <span class="w-2 h-2 rounded-full bg-purple-400 inline-block mr-1.5"></span>Core Gateway
+        </button>
+        <button onclick="filterRoutersByRole('ac')" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-dark-850 text-slate-300 hover:text-white border border-slate-800 router-role-filter" data-role="ac">
+          <span class="w-2 h-2 rounded-full bg-blue-400 inline-block mr-1.5"></span>PPPoE AC
+        </button>
+        <button onclick="filterRoutersByRole('border')" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-dark-850 text-slate-300 hover:text-white border border-slate-800 router-role-filter" data-role="border">
+          <span class="w-2 h-2 rounded-full bg-amber-400 inline-block mr-1.5"></span>Border Transit Edge
+        </button>
+        <button onclick="filterRoutersByRole('distribution')" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-dark-850 text-slate-300 hover:text-white border border-slate-800 router-role-filter" data-role="distribution">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 inline-block mr-1.5"></span>Distribution
+        </button>
+        <button onclick="filterRoutersByRole('cpe')" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-dark-850 text-slate-300 hover:text-white border border-slate-800 router-role-filter" data-role="cpe">
+          <span class="w-2 h-2 rounded-full bg-indigo-400 inline-block mr-1.5"></span>CPE / Customer
+        </button>
+        <button onclick="filterRoutersByRole('other')" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-dark-850 text-slate-300 hover:text-white border border-slate-800 router-role-filter" data-role="other">
+          <span class="w-2 h-2 rounded-full bg-slate-400 inline-block mr-1.5"></span>Other
+        </button>
+      </div>
+
+      <!-- Routers Table -->
+      <div class="bg-dark-850 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs text-slate-300">
+            <thead class="bg-dark-900 border-b border-slate-800 text-slate-400 font-semibold uppercase text-[10px] tracking-wider">
+              <tr>
+                <th class="py-3 px-4">Router Name / Host</th>
+                <th class="py-3 px-4">Role</th>
+                <th class="py-3 px-4">Protocol / Port</th>
+                <th class="py-3 px-4">Live Status</th>
+                <th class="py-3 px-4">Hardware Model &amp; RouterOS</th>
+                <th class="py-3 px-4">CPU &amp; Uptime</th>
+                <th class="py-3 px-4 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="routers-table-body" class="divide-y divide-slate-800/60 font-mono text-xs">
+              <tr>
+                <td colspan="7" class="text-center py-8 text-slate-500 font-sans">Loading onboarded routers...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================= -->
     <!-- TAB: IP INTELLIGENCE & REPUTATION -->
     <!-- ========================================================= -->
     <section id="tab-ip-intel" class="tab-content hidden space-y-6">
@@ -1547,6 +1667,171 @@
       <div class="flex justify-end gap-3 pt-2 border-t border-slate-800">
         <button onclick="closeIncidentDetailModal()" class="px-4 py-2 rounded-xl bg-dark-800 hover:bg-dark-700 border border-slate-700 text-slate-200 text-xs font-semibold">Cancel</button>
         <button onclick="saveIncidentStatusUpdate()" class="px-5 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow-md shadow-brand-600/30">Save Update</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: ONBOARD / EDIT ROUTER -->
+  <div id="modal-router-onboard" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+    <div class="w-full max-w-xl p-6 rounded-2xl bg-dark-850 border border-slate-700 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+        <h3 class="text-base font-bold text-white flex items-center gap-2" id="modal-router-title">
+          <i data-lucide="router" class="w-5 h-5 text-cyan-400"></i> Onboard MikroTik Router
+        </h3>
+        <button onclick="closeRouterModal()" class="text-slate-400 hover:text-white transition-colors">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form id="router-form" onsubmit="handleSaveRouter(event)" class="space-y-4">
+        <input type="hidden" id="modal-router-id" value="">
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Router Name *</label>
+            <input type="text" id="modal-router-name" required placeholder="e.g. Core CCR2116 NAT Gateway" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-cyan-500">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Router Role *</label>
+            <select id="modal-router-role" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-cyan-500">
+              <option value="core" selected>Core Gateway (CGNAT / BGP Core)</option>
+              <option value="ac">PPPoE Access Concentrator (AC)</option>
+              <option value="border">Border / Transit Edge Router</option>
+              <option value="distribution">Distribution / Aggregation Node</option>
+              <option value="cpe">CPE / Customer Premise Router</option>
+              <option value="other">Other / General Purpose RouterOS</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div class="sm:col-span-2">
+            <label class="block text-xs font-semibold text-slate-300 mb-1">IP Address or Hostname *</label>
+            <input type="text" id="modal-router-host" required placeholder="e.g. 100.91.0.1 or router.noc.net" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-cyan-500">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Port</label>
+            <input type="number" id="modal-router-port" value="8728" min="1" max="65535" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-cyan-500">
+          </div>
+        </div>
+
+        <div class="p-3.5 rounded-xl bg-dark-900/80 border border-slate-800 space-y-3">
+          <div class="text-xs font-semibold text-slate-300 flex items-center justify-between">
+            <span class="flex items-center gap-1.5"><i data-lucide="key" class="w-3.5 h-3.5 text-amber-400"></i> Least-Privilege API Credentials</span>
+            <span class="text-[10px] text-slate-500 font-normal">Requires read-only permissions for telemetry</span>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-[11px] font-semibold text-slate-400 mb-1">Username *</label>
+              <input type="text" id="modal-router-user" required value="security_ro" placeholder="security_ro" class="w-full px-3 py-1.5 rounded-lg bg-dark-850 border border-slate-700 text-xs text-white focus:outline-none focus:border-cyan-500">
+            </div>
+            <div>
+              <label class="block text-[11px] font-semibold text-slate-400 mb-1" id="label-router-password">Password *</label>
+              <input type="password" id="modal-router-pass" placeholder="Enter RouterOS password..." class="w-full px-3 py-1.5 rounded-lg bg-dark-850 border border-slate-700 text-xs text-white focus:outline-none focus:border-cyan-500">
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-4 pt-1">
+            <label class="flex items-center gap-2 cursor-pointer text-xs text-slate-300">
+              <input type="checkbox" id="modal-router-ssl" onchange="handleRouterProtocolChange()" class="rounded bg-dark-850 border-slate-700 text-cyan-500 focus:ring-0">
+              <span>Use SSL / TLS (Port 8729)</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer text-xs text-slate-300">
+              <input type="checkbox" id="modal-router-rest" onchange="handleRouterProtocolChange()" class="rounded bg-dark-850 border-slate-700 text-cyan-500 focus:ring-0">
+              <span>Use RouterOS v7 REST API (HTTPS)</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer text-xs text-slate-300">
+              <input type="checkbox" id="modal-router-enabled" checked class="rounded bg-dark-850 border-slate-700 text-cyan-500 focus:ring-0">
+              <span>Enabled</span>
+            </label>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Notes / Physical Location</label>
+          <input type="text" id="modal-router-notes" placeholder="e.g. Rack A-04, Data Center 1, Dual 10G SFP+ Uplinks" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-cyan-500">
+        </div>
+
+        <div id="modal-router-test-result" class="hidden p-3 rounded-xl text-xs font-mono"></div>
+
+        <div class="flex items-center justify-between pt-3 border-t border-slate-800">
+          <button type="button" id="btn-test-modal-router" onclick="testModalRouterConnection()" class="px-3.5 py-2 rounded-xl bg-dark-800 hover:bg-dark-750 border border-slate-700 text-xs text-cyan-400 font-semibold flex items-center gap-1.5 transition-all">
+            <i data-lucide="zap" class="w-3.5 h-3.5"></i> Test Connection
+          </button>
+          <div class="flex gap-2">
+            <button type="button" onclick="closeRouterModal()" class="px-4 py-2 rounded-xl bg-dark-800 hover:bg-dark-700 border border-slate-700 text-slate-200 text-xs font-semibold">Cancel</button>
+            <button type="submit" id="btn-save-router" class="px-5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold shadow-md shadow-cyan-600/30 flex items-center gap-1.5">
+              <i data-lucide="save" class="w-3.5 h-3.5"></i> Save Router
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: SYSTEM UPDATES (GITHUB chavxxx/SpecOPS) -->
+  <div id="modal-system-update" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+    <div class="w-full max-w-lg p-6 rounded-2xl bg-dark-850 border border-slate-700 shadow-2xl space-y-5">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+        <div>
+          <h3 class="text-base font-bold text-white flex items-center gap-2">
+            <i data-lucide="git-branch" class="w-5 h-5 text-cyan-400"></i> SpecOPS System Updates
+          </h3>
+          <p class="text-xs text-slate-400 mt-0.5">Automated release check against GitHub repository <span class="font-mono text-cyan-300">chavxxx/SpecOPS</span></p>
+        </div>
+        <button onclick="closeUpdateModal()" class="text-slate-400 hover:text-white transition-colors">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Update State Card -->
+      <div id="update-status-card" class="p-4 rounded-xl bg-dark-900 border border-slate-800 space-y-3">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span id="update-status-icon" class="w-3 h-3 rounded-full bg-slate-500"></span>
+            <span id="update-status-header" class="text-xs font-bold text-slate-200">Checking for updates...</span>
+          </div>
+          <span id="update-status-badge" class="px-2 py-0.5 rounded text-[10px] font-bold font-mono uppercase bg-slate-800 text-slate-400 border border-slate-700">Checking</span>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 text-xs pt-1">
+          <div class="p-2.5 rounded-lg bg-dark-850 border border-slate-800">
+            <div class="text-[10px] uppercase font-semibold text-slate-500">Local Release</div>
+            <div class="font-mono font-bold text-white mt-0.5" id="update-local-version">v1.2.0</div>
+            <div class="font-mono text-[10px] text-slate-400 mt-0.5 truncate" id="update-local-commit">—</div>
+          </div>
+          <div class="p-2.5 rounded-lg bg-dark-850 border border-slate-800">
+            <div class="text-[10px] uppercase font-semibold text-slate-500">Remote Origin/Main</div>
+            <div class="font-mono font-bold text-cyan-300 mt-0.5" id="update-remote-branch">main</div>
+            <div class="font-mono text-[10px] text-slate-400 mt-0.5 truncate" id="update-remote-commit">—</div>
+          </div>
+        </div>
+
+        <!-- Latest Commit Info Box -->
+        <div id="update-commit-details" class="hidden p-3 rounded-lg bg-dark-850/80 border border-slate-800/80 text-xs space-y-1">
+          <div class="text-[10px] uppercase font-semibold text-slate-400">Latest GitHub Commit:</div>
+          <div class="text-slate-200 font-mono text-[11px]" id="update-commit-message">—</div>
+          <div class="text-[10px] text-slate-500" id="update-commit-meta">—</div>
+        </div>
+
+        <!-- Update Action / Warning -->
+        <div id="update-alert-box" class="p-3 rounded-lg bg-slate-800/40 border border-slate-700 text-xs text-slate-300">
+          Checking upstream repository commits...
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="flex items-center justify-between pt-2 border-t border-slate-800">
+        <button onclick="checkSystemUpdate(true)" id="btn-recheck-update" class="px-3.5 py-2 rounded-xl bg-dark-800 hover:bg-dark-750 border border-slate-700 text-xs text-slate-200 font-semibold flex items-center gap-1.5 transition-all">
+          <i data-lucide="refresh-cw" class="w-3.5 h-3.5" id="update-spinner"></i> Check Again
+        </button>
+        <div class="flex gap-2">
+          <button onclick="closeUpdateModal()" class="px-4 py-2 rounded-xl bg-dark-800 hover:bg-dark-700 border border-slate-700 text-slate-200 text-xs font-semibold">Close</button>
+          <button onclick="applySystemUpdate()" id="btn-apply-update" disabled class="hidden px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold shadow-lg shadow-emerald-600/30 flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed">
+            <i data-lucide="download" class="w-3.5 h-3.5"></i> Apply Update Now
+          </button>
+        </div>
       </div>
     </div>
   </div>
