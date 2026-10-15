@@ -290,6 +290,8 @@ class IPRemediationAgent:
             return {
                 "success": True,
                 "is_clean": True,
+                "verified_clean": True,
+                "active_listings_remaining": 0,
                 "status": "completed",
                 "message": f"Success! {ip_str} has been verified 100% clean across all intelligence feeds."
             }
@@ -310,7 +312,9 @@ class IPRemediationAgent:
             return {
                 "success": True,
                 "is_clean": False,
+                "verified_clean": False,
                 "status": "monitoring",
                 "remaining_listings": remaining,
+                "active_listings_remaining": len(remaining),
                 "message": f"IP still flagged on: {', '.join(remaining)}. Monitoring watcher active."
             }

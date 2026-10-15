@@ -1261,7 +1261,8 @@ async function verifyRemediationClean(jobId) {
     const data = await res.json();
     resultDiv.classList.remove("hidden");
 
-    if (data.verified_clean) {
+    const isClean = Boolean(data.verified_clean || data.is_clean);
+    if (isClean) {
       resultDiv.innerHTML = `
         <div class="p-4 rounded-xl bg-emerald-950/40 border border-emerald-500/40 text-emerald-300 flex items-start gap-3">
           <i data-lucide="shield-check" class="w-5 h-5 text-emerald-400 shrink-0 mt-0.5"></i>
@@ -1279,11 +1280,12 @@ async function verifyRemediationClean(jobId) {
       showIntelToast("IP successfully verified clean!");
       if (typeof loadIPIntelInventory === "function") loadIPIntelInventory();
     } else {
+      const remainingCount = data.active_listings_remaining !== undefined ? data.active_listings_remaining : (data.remaining_listings ? data.remaining_listings.length : 0);
       resultDiv.innerHTML = `
         <div class="p-4 rounded-xl bg-amber-950/40 border border-amber-500/40 text-amber-300 flex items-start gap-3">
           <i data-lucide="alert-triangle" class="w-5 h-5 text-amber-400 shrink-0 mt-0.5"></i>
           <div>
-            <div class="text-xs font-bold text-white">Active Listings Still Detected (${data.active_listings_remaining})</div>
+            <div class="text-xs font-bold text-white">Active Listings Still Detected (${remainingCount})</div>
             <div class="text-xs text-amber-300/90 mt-0.5">${data.message}</div>
           </div>
         </div>
