@@ -204,6 +204,9 @@ class IPIntelDatabaseMixin:
 
         # Indexes for fast querying
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_intel_inv_ip ON ip_intel_inventory (ip_address);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_intel_inv_cidr ON ip_intel_inventory (cidr_allocation);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_intel_inv_status ON ip_intel_inventory (monitoring_status);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_intel_inv_rep ON ip_intel_inventory (current_reputation_status);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_intel_obs_ip_time ON ip_intel_observations (ip_address, check_timestamp);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_intel_obs_prov ON ip_intel_observations (provider_id, is_listed);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_intel_hist_ip ON ip_intel_history (ip_address, timestamp);")
@@ -479,6 +482,7 @@ class IPIntelDatabaseMixin:
         reputation_status: Optional[str] = None,
         purpose_role: Optional[str] = None,
         search: Optional[str] = None,
+        cidr_allocation: Optional[str] = None,
         sort_by: str = "recent",
         limit: int = 100,
         offset: int = 0
@@ -494,6 +498,12 @@ class IPIntelDatabaseMixin:
         if purpose_role:
             query += " AND purpose_role = ?"
             params.append(purpose_role)
+        if cidr_allocation:
+            if cidr_allocation in ("Unassigned / Direct", "unassigned"):
+                query += " AND (cidr_allocation IS NULL OR cidr_allocation = '')"
+            else:
+                query += " AND cidr_allocation = ?"
+                params.append(cidr_allocation)
         if search:
             pattern = f"%{search.strip()}%"
             query += " AND (ip_address LIKE ? OR cidr_allocation LIKE ? OR purpose_role LIKE ? OR notes LIKE ?)"
@@ -525,7 +535,8 @@ class IPIntelDatabaseMixin:
         monitoring_status: Optional[str] = None,
         reputation_status: Optional[str] = None,
         purpose_role: Optional[str] = None,
-        search: Optional[str] = None
+        search: Optional[str] = None,
+        cidr_allocation: Optional[str] = None
     ) -> int:
         query = "SELECT COUNT(*) FROM ip_intel_inventory WHERE 1=1"
         params: List[Any] = []
@@ -538,6 +549,12 @@ class IPIntelDatabaseMixin:
         if purpose_role:
             query += " AND purpose_role = ?"
             params.append(purpose_role)
+        if cidr_allocation:
+            if cidr_allocation in ("Unassigned / Direct", "unassigned"):
+                query += " AND (cidr_allocation IS NULL OR cidr_allocation = '')"
+            else:
+                query += " AND cidr_allocation = ?"
+                params.append(cidr_allocation)
         if search:
             pattern = f"%{search.strip()}%"
             query += " AND (ip_address LIKE ? OR cidr_allocation LIKE ? OR purpose_role LIKE ? OR notes LIKE ?)"
@@ -564,6 +581,86 @@ class IPIntelDatabaseMixin:
             cursor.execute("DELETE FROM ip_intel_inventory WHERE ip_address = ?;", (ip_address,))
             conn.commit()
             return cursor.rowcount > 0
+
+    def get_ip_blocks(self) -> List[Dict[str, Any]]:
+        """Aggregates IP blocks / CIDR allocations with total, active, and disabled counts"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 
+                    COALESCE(NULLIF(cidr_allocation, ''), 'Unassigned / Direct') as cidr_allocation,
+                    COUNT(*) as total_ips,
+                    SUM(CASE WHEN monitoring_status = 'active' THEN 1 ELSE 0 END) as active_ips,
+                    SUM(CASE WHEN monitoring_status = 'disabled' THEN 1 ELSE 0 END) as disabled_ips,
+                    SUM(CASE WHEN current_reputation_status = 'CLEAN' THEN 1 ELSE 0 END) as clean_count,
+                    SUM(CASE WHEN current_reputation_status IN ('LISTED', 'HIGH_RISK') THEN 1 ELSE 0 END) as listed_count,
+                    COALESCE(purpose_role, 'CGNAT Pool') as purpose_role,
+                    MAX(last_checked_at) as last_checked_at
+                FROM ip_intel_inventory
+                GROUP BY COALESCE(NULLIF(cidr_allocation, ''), 'Unassigned / Direct')
+                ORDER BY total_ips DESC;
+            """)
+            rows = cursor.fetchall()
+            cols = [d[0] for d in cursor.description]
+            blocks = []
+            for row in rows:
+                d = dict(zip(cols, row))
+                total = d["total_ips"]
+                act = d["active_ips"]
+                dis = d["disabled_ips"]
+                if act == 0 and dis > 0:
+                    status = "disabled"
+                elif dis == 0 and act > 0:
+                    status = "active"
+                else:
+                    status = "mixed" if (act > 0 and dis > 0) else "active"
+                d["status"] = status
+                blocks.append(d)
+            return blocks
+
+    def set_ip_block_status(self, cidr_allocation: str, monitoring_status: str) -> int:
+        """Enables or disables monitoring for all IP addresses in an IP block / CIDR range"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if cidr_allocation in ('Unassigned / Direct', 'unassigned'):
+                cursor.execute("""
+                    UPDATE ip_intel_inventory
+                    SET monitoring_status = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE cidr_allocation IS NULL OR cidr_allocation = '';
+                """, (monitoring_status,))
+            else:
+                cursor.execute("""
+                    UPDATE ip_intel_inventory
+                    SET monitoring_status = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE cidr_allocation = ?;
+                """, (monitoring_status, cidr_allocation))
+            affected = cursor.rowcount
+            conn.commit()
+            return affected
+
+    def set_ip_status(self, ip_address: str, monitoring_status: str) -> bool:
+        """Sets monitoring status (e.g. active vs disabled) for a single IP address"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE ip_intel_inventory
+                SET monitoring_status = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE ip_address = ?;
+            """, (monitoring_status, ip_address))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_ip_block(self, cidr_allocation: str) -> int:
+        """Deletes all IPs belonging to a CIDR block from inventory"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if cidr_allocation in ('Unassigned / Direct', 'unassigned'):
+                cursor.execute("DELETE FROM ip_intel_inventory WHERE cidr_allocation IS NULL OR cidr_allocation = '';")
+            else:
+                cursor.execute("DELETE FROM ip_intel_inventory WHERE cidr_allocation = ?;", (cidr_allocation,))
+            affected = cursor.rowcount
+            conn.commit()
+            return affected
 
     def upsert_ip_inventory_item(
         self,
@@ -1006,16 +1103,20 @@ class IPIntelDatabaseMixin:
             cursor.execute("SELECT COUNT(*) FROM ip_intel_inventory WHERE monitoring_status = 'active';")
             total_monitored = cursor.fetchone()[0]
 
-            # Currently listed IPs
-            cursor.execute("SELECT COUNT(*) FROM ip_intel_inventory WHERE current_reputation_status IN ('LISTED', 'HIGH_RISK');")
+            # Disabled / Inactive IPs
+            cursor.execute("SELECT COUNT(*) FROM ip_intel_inventory WHERE monitoring_status = 'disabled';")
+            total_disabled = cursor.fetchone()[0]
+
+            # Currently listed IPs (active only)
+            cursor.execute("SELECT COUNT(*) FROM ip_intel_inventory WHERE monitoring_status = 'active' AND current_reputation_status IN ('LISTED', 'HIGH_RISK');")
             total_listed = cursor.fetchone()[0]
 
-            # Recent abuse
-            cursor.execute("SELECT COUNT(*) FROM ip_intel_inventory WHERE latest_abuse_report IS NOT NULL;")
+            # Recent abuse (active only)
+            cursor.execute("SELECT COUNT(*) FROM ip_intel_inventory WHERE monitoring_status = 'active' AND latest_abuse_report IS NOT NULL;")
             recent_abuse = cursor.fetchone()[0]
 
-            # Deteriorating IPs (suspicious or listed)
-            cursor.execute("SELECT COUNT(*) FROM ip_intel_inventory WHERE current_reputation_status IN ('SUSPICIOUS', 'HIGH_RISK');")
+            # Deteriorating IPs (suspicious or listed, active only)
+            cursor.execute("SELECT COUNT(*) FROM ip_intel_inventory WHERE monitoring_status = 'active' AND current_reputation_status IN ('SUSPICIOUS', 'HIGH_RISK');")
             deteriorating = cursor.fetchone()[0]
 
             # New listings in last N hours
@@ -1042,8 +1143,8 @@ class IPIntelDatabaseMixin:
             """)
             failed_checks = cursor.fetchone()[0]
 
-            # Requiring review (High Risk or Suspicious)
-            cursor.execute("SELECT COUNT(*) FROM ip_intel_inventory WHERE current_reputation_status IN ('HIGH_RISK', 'SUSPICIOUS');")
+            # Requiring review (High Risk or Suspicious, active only)
+            cursor.execute("SELECT COUNT(*) FROM ip_intel_inventory WHERE monitoring_status = 'active' AND current_reputation_status IN ('HIGH_RISK', 'SUSPICIOUS');")
             requiring_review = cursor.fetchone()[0]
 
             # Open investigations
@@ -1062,6 +1163,7 @@ class IPIntelDatabaseMixin:
 
             return {
                 "total_monitored_ips": total_monitored,
+                "total_disabled_ips": total_disabled,
                 "total_listed_ips": total_listed,
                 "total_recent_abuse_ips": recent_abuse,
                 "total_deteriorating_ips": deteriorating,

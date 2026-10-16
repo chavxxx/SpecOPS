@@ -557,3 +557,70 @@ async def test_ip_intel_api_overview_and_check(admin_headers, analyst_headers):
         res_verify = await client.post(f"/api/ip-intelligence/remediation/jobs/{job_id}/verify-clean", headers=admin_headers)
         assert res_verify.status_code == 200
         assert res_verify.json()["success"] is True
+
+        # 7. IP Block & Monitoring Status Controls
+        # List IP blocks
+        res_blocks = await client.get("/api/ip-intelligence/blocks", headers=analyst_headers)
+        assert res_blocks.status_code == 200
+        blocks_data = res_blocks.json()
+        assert isinstance(blocks_data, list)
+        assert len(blocks_data) >= 1
+        block_cidr = blocks_data[0]["cidr_allocation"]
+
+        # Analyst cannot toggle IP block status (requires admin)
+        res_toggle_unauth = await client.post(
+            "/api/ip-intelligence/blocks/toggle-status",
+            headers=analyst_headers,
+            json={"cidr_allocation": block_cidr, "monitoring_status": "disabled"}
+        )
+        assert res_toggle_unauth.status_code == 403
+
+        # Admin disables the IP block
+        res_toggle = await client.post(
+            "/api/ip-intelligence/blocks/toggle-status",
+            headers=admin_headers,
+            json={"cidr_allocation": block_cidr, "monitoring_status": "disabled"}
+        )
+        assert res_toggle.status_code == 200
+        toggle_data = res_toggle.json()
+        assert toggle_data["success"] is True
+        assert toggle_data["monitoring_status"] == "disabled"
+        assert toggle_data["affected_ips"] >= 1
+
+        # Verify overview stats now reflects disabled IPs
+        res_overview = await client.get("/api/ip-intelligence/overview", headers=analyst_headers)
+        assert res_overview.status_code == 200
+        overview_data = res_overview.json()
+        assert overview_data["total_disabled_ips"] >= 1
+
+        # Single IP status toggle
+        test_ip = "157.119.69.129"
+        res_ip_status = await client.put(
+            f"/api/ip-intelligence/inventory/{test_ip}/status",
+            headers=admin_headers,
+            json={"monitoring_status": "active"}
+        )
+        assert res_ip_status.status_code == 200
+        assert res_ip_status.json()["monitoring_status"] == "active"
+
+        # Filter inventory by cidr_allocation and monitoring_status
+        res_inv_filt = await client.get(
+            f"/api/ip-intelligence/inventory?cidr_allocation={block_cidr}&monitoring_status=disabled",
+            headers=analyst_headers
+        )
+        assert res_inv_filt.status_code == 200
+        inv_items = res_inv_filt.json()
+        assert isinstance(inv_items, list)
+        for itm in inv_items:
+            assert itm["monitoring_status"] == "disabled"
+
+        # Re-enable the IP block
+        res_reenable = await client.post(
+            "/api/ip-intelligence/blocks/toggle-status",
+            headers=admin_headers,
+            json={"cidr_allocation": block_cidr, "monitoring_status": "active"}
+        )
+        assert res_reenable.status_code == 200
+        assert res_reenable.json()["monitoring_status"] == "active"
+
+

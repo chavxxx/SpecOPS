@@ -36,6 +36,7 @@ class MonitoringStatus(str, Enum):
     RESERVED = "reserved"
     RETIRED = "retired"
     EXCLUDED = "excluded"
+    DISABLED = "disabled"
 
 class ScanStatus(str, Enum):
     PENDING = "pending"
@@ -205,6 +206,27 @@ class ProviderConfigUpdate(BaseModel):
     cache_duration_positive_sec: Optional[int] = None
     cache_duration_negative_sec: Optional[int] = None
 
+class IPBlockSummary(BaseModel):
+    cidr_allocation: str
+    total_ips: int
+    active_ips: int
+    disabled_ips: int
+    status: str  # active, disabled, mixed
+    purpose_role: Optional[str] = "CGNAT Pool"
+    clean_count: int = 0
+    listed_count: int = 0
+    last_checked_at: Optional[str] = None
+
+class IPBlockToggleRequest(BaseModel):
+    cidr_allocation: str
+    monitoring_status: MonitoringStatus = MonitoringStatus.DISABLED
+
+class IPStatusToggleRequest(BaseModel):
+    monitoring_status: MonitoringStatus = MonitoringStatus.DISABLED
+
+class IPBlockDeleteRequest(BaseModel):
+    cidr_allocation: str
+
 class IPIntelOverviewStats(BaseModel):
     total_monitored_ips: int
     total_listed_ips: int
@@ -217,6 +239,7 @@ class IPIntelOverviewStats(BaseModel):
     open_investigations_count: int
     last_successful_scan_at: Optional[str] = None
     provider_summary: List[Dict[str, Any]] = []
+    total_disabled_ips: int = 0
 
 class IPInvestigationCreate(BaseModel):
     ip_address: str

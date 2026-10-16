@@ -29,7 +29,11 @@ from app.models.ip_intel_schemas import (
     ReputationStatus,
     GamingCompatibilitySummary,
     RemediationJobCreate,
-    RemediationJobResponse
+    RemediationJobResponse,
+    IPBlockSummary,
+    IPBlockToggleRequest,
+    IPStatusToggleRequest,
+    IPBlockDeleteRequest
 )
 from app.services.ip_intel.base import is_valid_ip, get_ip_version, is_private_or_special_ip
 from app.services.ip_intel.scanner import get_ip_intel_scanner
@@ -191,6 +195,7 @@ async def list_ip_inventory(
     monitoring_status: Optional[str] = None,
     reputation_status: Optional[str] = None,
     purpose_role: Optional[str] = None,
+    cidr_allocation: Optional[str] = None,
     search: Optional[str] = None,
     sort_by: str = Query("recent"),
     limit: int = Query(100, ge=1, le=1000),
@@ -202,7 +207,8 @@ async def list_ip_inventory(
         monitoring_status=monitoring_status,
         reputation_status=reputation_status,
         purpose_role=purpose_role,
-        search=search
+        search=search,
+        cidr_allocation=cidr_allocation
     )
     response.headers["X-Total-Count"] = str(total)
     response.headers["Access-Control-Expose-Headers"] = "X-Total-Count"
@@ -211,6 +217,7 @@ async def list_ip_inventory(
         reputation_status=reputation_status,
         purpose_role=purpose_role,
         search=search,
+        cidr_allocation=cidr_allocation,
         sort_by=sort_by,
         limit=limit,
         offset=offset
@@ -333,6 +340,103 @@ async def delete_inventory_ip(
         details={"ip": ip_address}
     )
     return {"success": True, "message": f"Successfully removed {ip_address} from inventory."}
+
+@router.get("/blocks", response_model=List[IPBlockSummary])
+async def list_ip_blocks(
+    db: DatabaseManager = Depends(get_db),
+    user: UserResponse = Depends(require_read_or_admin)
+):
+    """
+    Returns aggregated summary of all configured IP blocks / CIDR subnets,
+    including total IPs, active monitored count, disabled count, and reputation metrics.
+    """
+    blocks = db.get_ip_blocks()
+    return [IPBlockSummary(**b) for b in blocks]
+
+@router.post("/blocks/toggle-status", response_model=Dict[str, Any])
+async def toggle_ip_block_status(
+    req: IPBlockToggleRequest,
+    db: DatabaseManager = Depends(get_db),
+    user: UserResponse = Depends(require_admin)
+):
+    """
+    Enables or disables monitoring for an entire IP block / CIDR range.
+    Disabling an unused or dormant IP block skips automated scans and dramatically accelerates GUI loading.
+    """
+    cidr = req.cidr_allocation.strip()
+    affected = db.set_ip_block_status(cidr, req.monitoring_status.value)
+    if affected == 0:
+        raise HTTPException(status_code=404, detail=f"No IP addresses found for block '{cidr}'.")
+
+    db.log_ip_intel_audit(
+        username=user.username,
+        action="toggle_ip_block_status",
+        target_type="cidr_block",
+        target_id=cidr,
+        details={"monitoring_status": req.monitoring_status.value, "affected_ips": affected}
+    )
+
+    action_label = "disabled" if req.monitoring_status.value == "disabled" else "enabled"
+    return {
+        "success": True,
+        "cidr_allocation": cidr,
+        "monitoring_status": req.monitoring_status.value,
+        "affected_ips": affected,
+        "message": f"IP block '{cidr}' ({affected} addresses) has been {action_label} successfully."
+    }
+
+@router.delete("/blocks", response_model=Dict[str, Any])
+async def delete_ip_block(
+    cidr_allocation: str = Query(..., description="CIDR block to remove entirely from inventory"),
+    db: DatabaseManager = Depends(get_db),
+    user: UserResponse = Depends(require_admin)
+):
+    """Deletes all IP addresses in an IP block / CIDR range from inventory"""
+    cidr = cidr_allocation.strip()
+    affected = db.delete_ip_block(cidr)
+    if affected == 0:
+        raise HTTPException(status_code=404, detail=f"No IP addresses found for block '{cidr}'.")
+
+    db.log_ip_intel_audit(
+        username=user.username,
+        action="delete_ip_block",
+        target_type="cidr_block",
+        target_id=cidr,
+        details={"deleted_ips": affected}
+    )
+    return {
+        "success": True,
+        "cidr_allocation": cidr,
+        "deleted_ips": affected,
+        "message": f"Successfully removed IP block '{cidr}' ({affected} addresses) from inventory."
+    }
+
+@router.put("/inventory/{ip_address}/status", response_model=Dict[str, Any])
+async def toggle_single_ip_status(
+    ip_address: str,
+    req: IPStatusToggleRequest,
+    db: DatabaseManager = Depends(get_db),
+    user: UserResponse = Depends(require_admin)
+):
+    """Toggles monitoring status (active vs disabled) for an individual IP address"""
+    clean_ip = ip_address.strip()
+    success = db.set_ip_status(clean_ip, req.monitoring_status.value)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"IP address '{clean_ip}' not found in inventory.")
+
+    db.log_ip_intel_audit(
+        username=user.username,
+        action="toggle_ip_status",
+        target_type="ip",
+        target_id=clean_ip,
+        details={"monitoring_status": req.monitoring_status.value}
+    )
+    return {
+        "success": True,
+        "ip_address": clean_ip,
+        "monitoring_status": req.monitoring_status.value,
+        "message": f"IP {clean_ip} monitoring status updated to {req.monitoring_status.value}."
+    }
 
 # ---------------------------------------------------------------------------
 # 5. IP DETAILS, HISTORY & CORRELATIONS

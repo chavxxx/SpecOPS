@@ -1386,7 +1386,10 @@
           <div class="p-4 rounded-xl bg-dark-850 border border-slate-800 shadow-md">
             <div class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Monitored IPs</div>
             <div id="kpi-intel-monitored" class="text-2xl font-black text-white mt-1">0</div>
-            <div class="text-[10px] text-slate-400 mt-1">Active inventory pool</div>
+            <div class="text-[10px] text-slate-400 mt-1 flex items-center justify-between">
+              <span>Active inventory pool</span>
+              <span id="kpi-intel-disabled-badge" class="hidden text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-mono border border-slate-700">0 disabled</span>
+            </div>
           </div>
           <div class="p-4 rounded-xl bg-dark-850 border border-rose-500/20 shadow-md">
             <div class="text-[11px] font-semibold text-rose-400 uppercase tracking-wider">Listed IPs</div>
@@ -1647,7 +1650,7 @@
                 Monitored Public IP Inventory
                 <span id="intel-inv-total-badge" class="px-2 py-0.5 rounded-full bg-dark-750 text-cyan-400 font-mono text-xs border border-slate-700">0 IPs</span>
               </h3>
-              <p class="text-xs text-slate-400 mt-0.5">Authoritative registry of ISP public IP allocations, roles, and current reputation states</p>
+              <p class="text-xs text-slate-400 mt-0.5">Authoritative registry of ISP public IP allocations, roles, and reputation states</p>
             </div>
             <div class="flex items-center gap-2">
               <a href="/api/ip-intelligence/export/csv" class="px-3 py-1.5 rounded-lg bg-dark-800 hover:bg-dark-750 border border-slate-700 text-slate-300 text-xs font-semibold flex items-center gap-1.5">
@@ -1659,8 +1662,28 @@
             </div>
           </div>
 
+          <!-- IP BLOCKS / SUBNETS ALLOCATION DECK -->
+          <div id="intel-blocks-summary" class="p-4 rounded-xl bg-dark-900/80 border border-slate-800 space-y-3">
+            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+              <div class="flex items-center gap-2">
+                <i data-lucide="layers" class="w-4 h-4 text-cyan-400"></i>
+                <h4 class="text-xs font-bold text-slate-200 uppercase tracking-wider">Allocated IP Blocks & Subnets</h4>
+                <span id="intel-blocks-count-badge" class="px-2 py-0.5 rounded-full bg-dark-750 text-cyan-400 font-mono text-[10px] border border-slate-700">0 Blocks</span>
+              </div>
+              <div class="flex items-center gap-2 text-[11px] text-slate-400">
+                <span>Disable inactive IP blocks to accelerate queries & skip dormant ranges</span>
+                <button onclick="loadIPBlocksSummary()" class="p-1 hover:text-white text-slate-400 transition-colors" title="Refresh Blocks">
+                  <i data-lucide="refresh-cw" class="w-3 h-3"></i>
+                </button>
+              </div>
+            </div>
+            <div id="intel-blocks-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              <div class="text-xs text-slate-500 italic py-2">Loading IP blocks...</div>
+            </div>
+          </div>
+
           <!-- Filter & Search Toolbar -->
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-2">
+          <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-2.5 pt-1">
             <div class="lg:col-span-2 relative">
               <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-2.5"></i>
               <input type="text" id="intel-inv-search" oninput="debounceInventorySearch()" placeholder="Search IP, CIDR, role, or notes..." class="w-full pl-9 pr-8 py-1.5 rounded-lg bg-dark-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 font-mono">
@@ -1669,7 +1692,19 @@
               </button>
             </div>
             <div>
-              <select id="intel-inv-role-filter" onchange="applyInventoryFilter()" class="w-full px-3 py-1.5 rounded-lg bg-dark-900 border border-slate-700 text-xs text-slate-200 focus:outline-none focus:border-cyan-500">
+              <select id="intel-inv-block-filter" onchange="applyInventoryFilter()" class="w-full px-2.5 py-1.5 rounded-lg bg-dark-900 border border-slate-700 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 font-mono">
+                <option value="">All IP Blocks</option>
+              </select>
+            </div>
+            <div>
+              <select id="intel-inv-monitoring-filter" onchange="applyInventoryFilter()" class="w-full px-2.5 py-1.5 rounded-lg bg-dark-900 border border-slate-700 text-xs text-slate-200 focus:outline-none focus:border-cyan-500">
+                <option value="">All Monitoring</option>
+                <option value="active">Active (Monitored)</option>
+                <option value="disabled">Disabled (Inactive)</option>
+              </select>
+            </div>
+            <div>
+              <select id="intel-inv-role-filter" onchange="applyInventoryFilter()" class="w-full px-2.5 py-1.5 rounded-lg bg-dark-900 border border-slate-700 text-xs text-slate-200 focus:outline-none focus:border-cyan-500">
                 <option value="">All Roles</option>
                 <option value="CGNAT Pool">CGNAT Subscriber Pool</option>
                 <option value="Core Infrastructure">Core Infrastructure</option>
@@ -1678,19 +1713,19 @@
               </select>
             </div>
             <div>
-              <select id="intel-inv-status-filter" onchange="applyInventoryFilter()" class="w-full px-3 py-1.5 rounded-lg bg-dark-900 border border-slate-700 text-xs text-slate-200 focus:outline-none focus:border-cyan-500">
+              <select id="intel-inv-status-filter" onchange="applyInventoryFilter()" class="w-full px-2.5 py-1.5 rounded-lg bg-dark-900 border border-slate-700 text-xs text-slate-200 focus:outline-none focus:border-cyan-500">
                 <option value="">All Reputations</option>
                 <option value="CLEAN">Clean Only</option>
                 <option value="LISTED">Listed</option>
                 <option value="HIGH_RISK">High Risk</option>
-                <option value="UNKNOWN">Unknown / Not Checked</option>
+                <option value="UNKNOWN">Unknown</option>
               </select>
             </div>
             <div>
-              <select id="intel-inv-sort" onchange="applyInventoryFilter()" class="w-full px-3 py-1.5 rounded-lg bg-dark-900 border border-slate-700 text-xs text-slate-200 focus:outline-none focus:border-cyan-500">
-                <option value="recent" selected>Recently Added / Updated</option>
-                <option value="ip_asc">IP Address (Ascending)</option>
-                <option value="ip_desc">IP Address (Descending)</option>
+              <select id="intel-inv-sort" onchange="applyInventoryFilter()" class="w-full px-2.5 py-1.5 rounded-lg bg-dark-900 border border-slate-700 text-xs text-slate-200 focus:outline-none focus:border-cyan-500">
+                <option value="recent" selected>Recently Updated</option>
+                <option value="ip_asc">IP (Ascending)</option>
+                <option value="ip_desc">IP (Descending)</option>
                 <option value="risk_desc">Highest Risk Score</option>
               </select>
             </div>
@@ -1873,6 +1908,13 @@
           <div>
             <label class="block text-xs font-semibold text-slate-300 mb-1">Administrative Notes</label>
             <input type="text" id="modal-inv-notes" placeholder="e.g. Core CCR2116 deterministic NAT block" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-slate-700 text-xs text-white focus:outline-none">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Initial Monitoring Status</label>
+            <select id="modal-inv-monitoring" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-slate-700 text-xs text-white focus:outline-none">
+              <option value="active" selected>Active (Monitored & Background Scanned)</option>
+              <option value="disabled">Disabled (Excluded from Scans - Faster)</option>
+            </select>
           </div>
         </div>
         <div class="flex justify-end gap-3 pt-2 border-t border-slate-800">
@@ -2546,8 +2588,8 @@
   <div id="toast-container" class="fixed bottom-5 right-5 z-50 space-y-2"></div>
 
   <!-- APPLICATION SCRIPTS -->
-  <script src="/static/js/app.js?v=2.3.0"></script>
-  <script src="/static/js/security.js?v=2.3.0"></script>
-  <script src="/static/js/ip_intel.js?v=2.3.0"></script>
+  <script src="/static/js/app.js?v=2.4.0"></script>
+  <script src="/static/js/security.js?v=2.4.0"></script>
+  <script src="/static/js/ip_intel.js?v=2.4.0"></script>
 </body>
 </html>

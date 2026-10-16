@@ -68,6 +68,7 @@ function switchIntelSubTab(subTabId) {
   if (subTabId === "overview") {
     loadIPIntelOverview();
   } else if (subTabId === "inventory") {
+    loadIPBlocksSummary();
     loadIPIntelInventory();
   } else if (subTabId === "providers") {
     loadIPIntelProviders();
@@ -93,6 +94,17 @@ async function loadIPIntelOverview(timeWindow = "24h") {
     const data = await res.json();
 
     document.getElementById("kpi-intel-monitored").innerText = data.total_monitored_ips || 0;
+    
+    const disBadge = document.getElementById("kpi-intel-disabled-badge");
+    if (disBadge) {
+      if (data.total_disabled_ips && data.total_disabled_ips > 0) {
+        disBadge.classList.remove("hidden");
+        disBadge.textContent = `${data.total_disabled_ips} disabled`;
+      } else {
+        disBadge.classList.add("hidden");
+      }
+    }
+
     document.getElementById("kpi-intel-listed").innerText = data.total_listed_ips || 0;
     document.getElementById("kpi-intel-abuse").innerText = data.total_recent_abuse_ips || 0;
     document.getElementById("kpi-intel-deteriorating").innerText = data.total_deteriorating_ips || 0;
@@ -604,9 +616,15 @@ let currentInvLimit = 50;
 let currentInvSearch = "";
 let currentInvRole = "";
 let currentInvStatus = "";
+let currentInvBlock = "";
+let currentInvMonitoring = "";
 let currentInvSort = "recent";
 let currentInvTotal = 0;
 let invSearchDebounceTimer = null;
+
+function escapeId(str) {
+  return String(str || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+}
 
 function debounceInventorySearch() {
   const input = document.getElementById("intel-inv-search");
@@ -637,10 +655,14 @@ function clearInventorySearch() {
 function applyInventoryFilter() {
   const roleEl = document.getElementById("intel-inv-role-filter");
   const statusEl = document.getElementById("intel-inv-status-filter");
+  const blockEl = document.getElementById("intel-inv-block-filter");
+  const monEl = document.getElementById("intel-inv-monitoring-filter");
   const sortEl = document.getElementById("intel-inv-sort");
 
   currentInvRole = roleEl ? roleEl.value : "";
   currentInvStatus = statusEl ? statusEl.value : "";
+  currentInvBlock = blockEl ? blockEl.value : "";
+  currentInvMonitoring = monEl ? monEl.value : "";
   currentInvSort = sortEl ? sortEl.value : "recent";
   currentInvPage = 1;
   loadIPIntelInventory();
@@ -668,6 +690,196 @@ function nextInventoryPage() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// IP BLOCKS ALLOCATION DECK & MONITORING CONTROLS
+// ---------------------------------------------------------------------------
+async function loadIPBlocksSummary() {
+  const container = document.getElementById("intel-blocks-container");
+  const countBadge = document.getElementById("intel-blocks-count-badge");
+  const blockSelect = document.getElementById("intel-inv-block-filter");
+  if (!container) return;
+
+  try {
+    const res = await fetch("/api/ip-intelligence/blocks", {
+      headers: getAuthHeaders()
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blocks = await res.json();
+
+    if (countBadge) {
+      countBadge.textContent = `${blocks.length} Block${blocks.length === 1 ? '' : 's'}`;
+    }
+
+    // Populate dropdown options
+    if (blockSelect) {
+      const prevVal = blockSelect.value;
+      blockSelect.innerHTML = `<option value="">All IP Blocks (${blocks.length})</option>` +
+        blocks.map(b => `<option value="${escapeHtml(b.cidr_allocation)}">${escapeHtml(b.cidr_allocation)} (${b.total_ips} IPs - ${b.status.toUpperCase()})</option>`).join("");
+      blockSelect.value = prevVal;
+    }
+
+    if (!blocks || blocks.length === 0) {
+      container.innerHTML = `<div class="col-span-full py-4 text-center text-xs text-slate-400">No allocated IP blocks found in inventory.</div>`;
+      return;
+    }
+
+    container.innerHTML = blocks.map(b => {
+      const isDis = b.status === "disabled";
+      const isMixed = b.status === "mixed";
+      const statusPill = isDis
+        ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700 flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-slate-500"></span> DISABLED</span>`
+        : (isMixed
+          ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-300 border border-amber-500/30 flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> PARTIAL</span>`
+          : `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> MONITORED</span>`);
+
+      const toggleBtn = isDis
+        ? `<button id="btn-block-toggle-${escapeId(b.cidr_allocation)}" onclick="toggleIPBlockMonitoring('${escapeHtml(b.cidr_allocation)}', 'active')" class="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-sm transition-all flex items-center gap-1"><i data-lucide="play" class="w-3 h-3"></i> Enable</button>`
+        : `<button id="btn-block-toggle-${escapeId(b.cidr_allocation)}" onclick="toggleIPBlockMonitoring('${escapeHtml(b.cidr_allocation)}', 'disabled')" class="px-2.5 py-1 rounded bg-dark-800 hover:bg-rose-950/50 text-slate-300 hover:text-rose-300 border border-slate-700 hover:border-rose-500/40 text-xs font-semibold transition-all flex items-center gap-1"><i data-lucide="pause" class="w-3 h-3 text-rose-400"></i> Disable</button>`;
+
+      return `
+        <div class="p-3.5 rounded-xl border transition-all ${isDis ? 'bg-dark-900/60 border-slate-800/80 opacity-75 hover:opacity-100' : 'bg-dark-850 border-slate-700/80 hover:border-slate-600'} flex flex-col justify-between gap-3">
+          <div>
+            <div class="flex items-start justify-between gap-2 mb-2">
+              <div>
+                <div class="font-mono font-bold text-xs text-white flex items-center gap-1.5">
+                  <i data-lucide="network" class="w-3.5 h-3.5 ${isDis ? 'text-slate-500' : 'text-cyan-400'}"></i>
+                  ${escapeHtml(b.cidr_allocation)}
+                </div>
+                <div class="text-[10px] text-slate-400 mt-0.5">${escapeHtml(b.purpose_role || 'CGNAT Pool')}</div>
+              </div>
+              ${statusPill}
+            </div>
+
+            <div class="grid grid-cols-2 gap-2 text-[11px] font-mono text-slate-300 bg-dark-900/80 p-2 rounded-lg border border-slate-800">
+              <div>
+                <span class="text-slate-500 text-[10px] uppercase">Pool Size:</span>
+                <div class="font-bold text-white">${b.total_ips} IPs</div>
+              </div>
+              <div>
+                <span class="text-slate-500 text-[10px] uppercase">Active:</span>
+                <div class="font-bold ${isDis ? 'text-slate-400' : 'text-emerald-400'}">${b.active_ips} Active</div>
+              </div>
+              <div>
+                <span class="text-slate-500 text-[10px] uppercase">Clean:</span>
+                <span class="font-semibold text-emerald-400">${b.clean_count}</span>
+              </div>
+              <div>
+                <span class="text-slate-500 text-[10px] uppercase">Listed:</span>
+                <span class="font-semibold ${b.listed_count > 0 ? 'text-rose-400 font-bold' : 'text-slate-400'}">${b.listed_count}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between pt-2 border-t border-slate-800/80">
+            <div class="flex items-center gap-1.5">
+              ${toggleBtn}
+              <button onclick="filterInventoryByBlock('${escapeHtml(b.cidr_allocation)}')" class="px-2.5 py-1 rounded bg-dark-800 hover:bg-dark-750 text-slate-300 text-xs font-medium border border-slate-700 transition-all flex items-center gap-1" title="Filter table by this block">
+                <i data-lucide="filter" class="w-3 h-3 text-cyan-400"></i> View
+              </button>
+            </div>
+            <button onclick="deleteIPBlock('${escapeHtml(b.cidr_allocation)}')" class="p-1.5 rounded hover:bg-rose-950/40 text-slate-500 hover:text-rose-400 transition-all" title="Delete entire block">
+              <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    renderIcons(container);
+  } catch (e) {
+    console.error("Failed to load IP blocks:", e);
+    container.innerHTML = `<div class="col-span-full text-xs text-rose-400 italic py-2">Failed to load IP blocks: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function toggleIPBlockMonitoring(cidr, newStatus) {
+  const btn = document.getElementById(`btn-block-toggle-${escapeId(cidr)}`);
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<i data-lucide="loader-2" class="w-3 h-3 animate-spin"></i> Updating...`;
+    renderIcons(btn);
+  }
+
+  try {
+    const res = await fetch("/api/ip-intelligence/blocks/toggle-status", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify({
+        cidr_allocation: cidr,
+        monitoring_status: newStatus
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Failed to update block status");
+
+    const isDis = newStatus === "disabled";
+    showIntelToast(data.message || `IP block '${cidr}' ${isDis ? 'disabled (loading & scans accelerated)' : 'enabled'}!`, false);
+
+    await loadIPBlocksSummary();
+    await loadIPIntelInventory();
+    loadIPIntelOverview();
+  } catch (e) {
+    showIntelToast(`Error: ${e.message}`, true);
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function toggleIPMonitoring(ip, newStatus) {
+  try {
+    const res = await fetch(`/api/ip-intelligence/inventory/${encodeURIComponent(ip)}/status`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify({ monitoring_status: newStatus })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Failed to update IP status");
+
+    const isDis = newStatus === "disabled";
+    showIntelToast(`IP ${ip} ${isDis ? 'disabled (skipped from scans)' : 'enabled for active monitoring'}!`, false);
+    await loadIPIntelInventory();
+    await loadIPBlocksSummary();
+    loadIPIntelOverview();
+  } catch (e) {
+    showIntelToast(`Error: ${e.message}`, true);
+  }
+}
+
+function filterInventoryByBlock(cidr) {
+  const blockSelect = document.getElementById("intel-inv-block-filter");
+  if (blockSelect) blockSelect.value = cidr;
+  currentInvBlock = cidr;
+  currentInvPage = 1;
+  loadIPIntelInventory();
+  showIntelToast(`Filtered inventory by block ${cidr}`);
+}
+
+async function deleteIPBlock(cidr) {
+  if (!confirm(`Are you sure you want to remove the ENTIRE IP block '${cidr}' and all its addresses from inventory?`)) return;
+  try {
+    const res = await fetch(`/api/ip-intelligence/blocks?cidr_allocation=${encodeURIComponent(cidr)}`, {
+      method: "DELETE",
+      headers: getAuthHeaders()
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Failed to delete IP block");
+
+    showIntelToast(data.message || `Deleted block '${cidr}'!`, false);
+    currentInvBlock = "";
+    currentInvPage = 1;
+    await loadIPBlocksSummary();
+    await loadIPIntelInventory();
+    loadIPIntelOverview();
+  } catch (e) {
+    showIntelToast(`Delete failed: ${e.message}`, true);
+  }
+}
+
 async function loadIPIntelInventory() {
   const tbody = document.getElementById("intel-inventory-tbody");
   if (!tbody) return;
@@ -687,6 +899,8 @@ async function loadIPIntelInventory() {
   if (currentInvSearch) params.append("search", currentInvSearch);
   if (currentInvRole) params.append("purpose_role", currentInvRole);
   if (currentInvStatus) params.append("reputation_status", currentInvStatus);
+  if (currentInvBlock) params.append("cidr_allocation", currentInvBlock);
+  if (currentInvMonitoring) params.append("monitoring_status", currentInvMonitoring);
 
   try {
     const res = await fetch(`/api/ip-intelligence/inventory?${params.toString()}`, {
@@ -708,13 +922,13 @@ async function loadIPIntelInventory() {
 
     if (countInfo) {
       if (currentInvTotal === 0) {
-        countInfo.textContent = (currentInvSearch || currentInvRole || currentInvStatus)
+        countInfo.textContent = (currentInvSearch || currentInvRole || currentInvStatus || currentInvBlock || currentInvMonitoring)
           ? "No matching IP addresses found"
           : "No IP addresses in inventory";
       } else {
         const start = offset + 1;
         const end = Math.min(offset + items.length, currentInvTotal);
-        countInfo.textContent = `Showing ${start}–${end} of ${currentInvTotal.toLocaleString()} IPs${(currentInvSearch || currentInvRole || currentInvStatus) ? ' (Filtered)' : ''}`;
+        countInfo.textContent = `Showing ${start}–${end} of ${currentInvTotal.toLocaleString()} IPs${(currentInvSearch || currentInvRole || currentInvStatus || currentInvBlock || currentInvMonitoring) ? ' (Filtered)' : ''}`;
       }
     }
 
@@ -723,66 +937,75 @@ async function loadIPIntelInventory() {
         <div class="flex flex-col items-center justify-center gap-2">
           <i data-lucide="search-x" class="w-8 h-8 text-slate-500"></i>
           <span>No IP addresses found matching the current criteria.</span>
-          ${(currentInvSearch || currentInvRole || currentInvStatus) ? '<button onclick="clearInventorySearch(); document.getElementById(\'intel-inv-role-filter\').value=\'\'; document.getElementById(\'intel-inv-status-filter\').value=\'\'; applyInventoryFilter();" class="text-xs text-brand-400 hover:underline mt-1">Clear all filters</button>' : ''}
+          ${(currentInvSearch || currentInvRole || currentInvStatus || currentInvBlock || currentInvMonitoring) ? '<button onclick="clearInventorySearch(); document.getElementById(\'intel-inv-role-filter\').value=\'\'; document.getElementById(\'intel-inv-status-filter\').value=\'\'; document.getElementById(\'intel-inv-block-filter\').value=\'\'; document.getElementById(\'intel-inv-monitoring-filter\').value=\'\'; applyInventoryFilter();" class="text-xs text-brand-400 hover:underline mt-1">Clear all filters</button>' : ''}
         </div>
       </td></tr>`;
       if (window.lucide) lucide.createIcons();
       return;
     }
 
-    tbody.innerHTML = items.map(it => `
-      <tr class="border-b border-slate-800/80 hover:bg-dark-750/50 transition-colors">
-        <td class="py-2.5 px-3">
-          <div class="font-mono font-bold text-white text-xs flex items-center gap-1.5">
-            ${it.ip_address}
-            <button onclick="copyToClipboard('${it.ip_address}', 'IP')" class="p-1 hover:text-white text-slate-400" title="Copy IP">
-              <i data-lucide="copy" class="w-3 h-3"></i>
-            </button>
-          </div>
-          <div class="text-[10px] text-slate-400">${it.cidr_allocation || 'Direct Allocation'}</div>
-        </td>
-        <td class="py-2.5 px-3 text-xs text-slate-300 font-medium">
-          ${it.purpose_role}
-        </td>
-        <td class="py-2.5 px-3">
-          <span class="px-2 py-0.5 rounded text-[10px] font-bold ${
-            it.monitoring_status === 'active' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-            (it.monitoring_status === 'reserved' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' : 'bg-slate-700 text-slate-400')
-          }">
-            ${it.monitoring_status.toUpperCase()}
-          </span>
-        </td>
-        <td class="py-2.5 px-3">
-          <span class="px-2 py-0.5 rounded text-[10px] font-bold ${
-            it.current_reputation_status === 'CLEAN' ? 'bg-emerald-500/20 text-emerald-300' :
-            (it.current_reputation_status === 'LISTED' || it.current_reputation_status === 'HIGH_RISK' ? 'bg-rose-500/20 text-rose-300' : 'bg-slate-700 text-slate-300')
-          }">
-            ${it.current_reputation_status}
-          </span>
-        </td>
-        <td class="py-2.5 px-3 text-xs font-mono">
-          <span class="${it.active_listing_count > 0 ? 'text-rose-400 font-bold' : 'text-slate-400'}">
-            ${it.active_listing_count}
-          </span>
-        </td>
-        <td class="py-2.5 px-3 text-xs text-slate-400">
-          ${it.last_checked_at ? formatManilaTime(it.last_checked_at) : 'Never'}
-        </td>
-        <td class="py-2.5 px-3 text-right">
-          <div class="flex items-center justify-end gap-1.5">
-            <button onclick="quickCheckIP('${it.ip_address}')" class="px-2 py-1 rounded bg-dark-700 hover:bg-dark-600 text-slate-200 text-xs font-semibold border border-slate-600 transition-all flex items-center gap-1">
-              <i data-lucide="shield-check" class="w-3 h-3 text-cyan-400"></i> Check
-            </button>
-            <button onclick="openRemediationModal('${it.ip_address}')" class="px-2 py-1 rounded bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs font-semibold border border-amber-500/30 transition-all flex items-center gap-1" title="Clean & Delist IP Agent">
-              <i data-lucide="sparkles" class="w-3 h-3 text-amber-400"></i> Clean
-            </button>
-            <button onclick="deleteInventoryIP('${it.ip_address}')" class="p-1 rounded hover:bg-rose-950/40 text-slate-400 hover:text-rose-400 transition-all border border-transparent hover:border-rose-500/30" title="Delete IP">
-              <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
-            </button>
-          </div>
-        </td>
-      </tr>
-    `).join("");
+    tbody.innerHTML = items.map(it => {
+      const isDis = it.monitoring_status === 'disabled';
+      const statusBadge = isDis
+        ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700">DISABLED</span>`
+        : (it.monitoring_status === 'active'
+          ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">ACTIVE</span>`
+          : `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20">${escapeHtml(it.monitoring_status.toUpperCase())}</span>`);
+
+      const toggleIpBtn = isDis
+        ? `<button onclick="toggleIPMonitoring('${it.ip_address}', 'active')" class="p-1 rounded bg-slate-800 hover:bg-emerald-950/40 text-slate-400 hover:text-emerald-400 transition-all border border-slate-700 hover:border-emerald-500/30" title="Enable Monitoring (Active)"><i data-lucide="play" class="w-3.5 h-3.5 text-emerald-400"></i></button>`
+        : `<button onclick="toggleIPMonitoring('${it.ip_address}', 'disabled')" class="p-1 rounded hover:bg-rose-950/40 text-slate-400 hover:text-amber-400 transition-all border border-transparent hover:border-amber-500/30" title="Disable Monitoring (Faster)"><i data-lucide="pause" class="w-3.5 h-3.5 text-amber-400"></i></button>`;
+
+      return `
+        <tr class="border-b border-slate-800/80 hover:bg-dark-750/50 transition-colors ${isDis ? 'opacity-60 hover:opacity-100' : ''}">
+          <td class="py-2.5 px-3">
+            <div class="font-mono font-bold text-white text-xs flex items-center gap-1.5">
+              ${it.ip_address}
+              <button onclick="copyToClipboard('${it.ip_address}', 'IP')" class="p-1 hover:text-white text-slate-400" title="Copy IP">
+                <i data-lucide="copy" class="w-3 h-3"></i>
+              </button>
+            </div>
+            <div class="text-[10px] text-slate-400">${escapeHtml(it.cidr_allocation || 'Direct Allocation')}</div>
+          </td>
+          <td class="py-2.5 px-3 text-xs text-slate-300 font-medium">
+            ${escapeHtml(it.purpose_role)}
+          </td>
+          <td class="py-2.5 px-3">
+            ${statusBadge}
+          </td>
+          <td class="py-2.5 px-3">
+            <span class="px-2 py-0.5 rounded text-[10px] font-bold ${
+              it.current_reputation_status === 'CLEAN' ? 'bg-emerald-500/20 text-emerald-300' :
+              (it.current_reputation_status === 'LISTED' || it.current_reputation_status === 'HIGH_RISK' ? 'bg-rose-500/20 text-rose-300' : 'bg-slate-700 text-slate-300')
+            }">
+              ${it.current_reputation_status}
+            </span>
+          </td>
+          <td class="py-2.5 px-3 text-xs font-mono">
+            <span class="${it.active_listing_count > 0 ? 'text-rose-400 font-bold' : 'text-slate-400'}">
+              ${it.active_listing_count}
+            </span>
+          </td>
+          <td class="py-2.5 px-3 text-xs text-slate-400">
+            ${it.last_checked_at ? formatManilaTime(it.last_checked_at) : 'Never'}
+          </td>
+          <td class="py-2.5 px-3 text-right">
+            <div class="flex items-center justify-end gap-1.5">
+              ${toggleIpBtn}
+              <button onclick="quickCheckIP('${it.ip_address}')" class="px-2 py-1 rounded bg-dark-700 hover:bg-dark-600 text-slate-200 text-xs font-semibold border border-slate-600 transition-all flex items-center gap-1" title="Quick check">
+                <i data-lucide="shield-check" class="w-3 h-3 text-cyan-400"></i> Check
+              </button>
+              <button onclick="openRemediationModal('${it.ip_address}')" class="px-2 py-1 rounded bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs font-semibold border border-amber-500/30 transition-all flex items-center gap-1" title="Clean & Delist IP Agent">
+                <i data-lucide="sparkles" class="w-3 h-3 text-amber-400"></i> Clean
+              </button>
+              <button onclick="deleteInventoryIP('${it.ip_address}')" class="p-1 rounded hover:bg-rose-950/40 text-slate-400 hover:text-rose-400 transition-all border border-transparent hover:border-rose-500/30" title="Delete IP">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join("");
 
     renderIcons(tbody);
   } catch (e) {
@@ -828,11 +1051,13 @@ async function addInventorySubmit() {
   const ipEl = document.getElementById("modal-inv-ip");
   const cidrEl = document.getElementById("modal-inv-cidr");
   const roleEl = document.getElementById("modal-inv-role");
+  const monEl = document.getElementById("modal-inv-monitoring");
   const notesEl = document.getElementById("modal-inv-notes");
 
   const ip = ipEl?.value.trim();
   const cidr = cidrEl?.value.trim();
   const role = roleEl?.value;
+  const monitoring = monEl?.value || "active";
   const notes = notesEl?.value;
 
   if (!ip) {
@@ -849,6 +1074,7 @@ async function addInventorySubmit() {
         ip_address: ip,
         cidr_allocation: cidr || null,
         purpose_role: role || "CGNAT Pool",
+        monitoring_status: monitoring,
         notes: notes || null
       })
     });
@@ -866,6 +1092,8 @@ async function addInventorySubmit() {
     if (sortEl) sortEl.value = "recent";
     currentInvPage = 1;
     clearInventorySearch();
+    await loadIPBlocksSummary();
+    await loadIPIntelInventory();
   } catch (e) {
     showIntelToast(e.message, true);
   }
