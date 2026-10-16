@@ -35,16 +35,20 @@
     }
   </script>
 
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-  <meta http-equiv="Pragma" content="no-cache">
-  <meta http-equiv="Expires" content="0">
+  <!-- Resource Hints for High-Speed CDN Loading -->
+  <link rel="preconnect" href="https://cdn.tailwindcss.com" crossorigin>
+  <link rel="preconnect" href="https://unpkg.com" crossorigin>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="dns-prefetch" href="https://cdn.tailwindcss.com">
+  <link rel="dns-prefetch" href="https://unpkg.com">
+  <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 
   <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
   <!-- Chart.js CDN -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-  <link rel="stylesheet" href="/static/css/styles.css?v=2.0.0">
+  <link rel="stylesheet" href="/static/css/styles.css?v=2.3.0">
 </head>
 <body class="bg-dark-900 text-slate-100 min-h-screen flex flex-col font-sans antialiased selection:bg-brand-500 selection:text-white">
 
@@ -1878,6 +1882,121 @@
       </div>
     </div>
 
+    <!-- REPUTATION INTELLIGENCE PROVIDER CONFIGURATION MODAL -->
+    <div id="modal-provider-config" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
+      <div class="w-full max-w-xl flex flex-col rounded-2xl bg-dark-850 border border-slate-700 shadow-2xl overflow-hidden my-auto">
+        
+        <!-- Header -->
+        <div class="px-6 py-4 bg-dark-900 border-b border-slate-800 flex items-center justify-between shrink-0">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
+              <i data-lucide="sliders" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <h3 id="modal-prov-title" class="text-base font-bold text-white tracking-wide">Configure Provider</h3>
+                <span id="modal-prov-type-badge" class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-slate-700 text-slate-300">DNSBL</span>
+              </div>
+              <p id="modal-prov-subtitle" class="text-xs text-slate-400 mt-0.5">Adjust API credentials, query endpoints, and rate limits.</p>
+            </div>
+          </div>
+          <button onclick="closeModal('modal-provider-config')" class="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-dark-800 transition-colors">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <!-- Body Form -->
+        <form id="form-provider-config" onsubmit="saveProviderConfig(event)" class="p-6 space-y-4 overflow-y-auto max-h-[75vh]">
+          <input type="hidden" id="modal-prov-id" value="">
+
+          <!-- Active / Enabled Status -->
+          <div class="flex items-center justify-between p-3.5 rounded-xl bg-dark-900 border border-slate-800">
+            <div>
+              <div class="text-xs font-bold text-white">Enable Provider in Scans</div>
+              <div class="text-[11px] text-slate-400">Include this provider in scheduled, manual, and background scans</div>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" id="modal-prov-enabled" class="sr-only peer">
+              <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-600"></div>
+            </label>
+          </div>
+
+          <!-- API Key Section (for REST APIs) -->
+          <div id="modal-prov-key-container" class="space-y-1.5">
+            <label class="block text-xs font-semibold text-slate-300 flex items-center justify-between">
+              <span>API Key / Secret Token</span>
+              <span id="modal-prov-key-status" class="text-[11px] text-slate-400 font-mono">None Configured</span>
+            </label>
+            <div class="relative">
+              <input type="password" id="modal-prov-key" placeholder="Enter new API key or leave blank to keep current..." class="w-full px-3 py-2 pr-10 rounded-lg bg-dark-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
+              <button type="button" onclick="toggleProvKeyVisibility()" class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-white">
+                <i data-lucide="eye" id="modal-prov-key-eye" class="w-4 h-4"></i>
+              </button>
+            </div>
+            <p class="text-[11px] text-slate-400">Keys are securely stored in the SpecOPS database and never exposed to unauthenticated clients.</p>
+          </div>
+
+          <!-- DNS Zone / Endpoint Grid -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div id="modal-prov-zone-container" class="space-y-1.5">
+              <label class="block text-xs font-semibold text-slate-300">DNSBL Zone</label>
+              <input type="text" id="modal-prov-zone" placeholder="e.g. zen.spamhaus.org" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
+            </div>
+            <div id="modal-prov-endpoint-container" class="space-y-1.5">
+              <label class="block text-xs font-semibold text-slate-300">API Endpoint URL</label>
+              <input type="text" id="modal-prov-endpoint" placeholder="e.g. https://api.abuseipdb.com/api/v2/check" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
+            </div>
+          </div>
+
+          <!-- Operational Parameters Grid -->
+          <div class="grid grid-cols-3 gap-3 pt-1">
+            <div class="space-y-1">
+              <label class="block text-[11px] font-semibold text-slate-300">Timeout (sec)</label>
+              <input type="number" id="modal-prov-timeout" step="0.5" min="1" max="30" value="5.0" class="w-full px-3 py-1.5 rounded-lg bg-dark-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
+            </div>
+            <div class="space-y-1">
+              <label class="block text-[11px] font-semibold text-slate-300">Rate Limit (rpm)</label>
+              <input type="number" id="modal-prov-ratelimit" min="5" max="1000" value="60" class="w-full px-3 py-1.5 rounded-lg bg-dark-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
+            </div>
+            <div class="space-y-1">
+              <label class="block text-[11px] font-semibold text-slate-300">Max Concurrent</label>
+              <input type="number" id="modal-prov-maxconcurrent" min="1" max="50" value="5" class="w-full px-3 py-1.5 rounded-lg bg-dark-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
+            </div>
+          </div>
+
+          <!-- Cache Settings Grid -->
+          <div class="grid grid-cols-2 gap-3">
+            <div class="space-y-1">
+              <label class="block text-[11px] font-semibold text-slate-300">Positive TTL (sec)</label>
+              <input type="number" id="modal-prov-pos-ttl" min="60" max="86400" value="1800" class="w-full px-3 py-1.5 rounded-lg bg-dark-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
+            </div>
+            <div class="space-y-1">
+              <label class="block text-[11px] font-semibold text-slate-300">Negative TTL (sec)</label>
+              <input type="number" id="modal-prov-neg-ttl" min="60" max="86400" value="7200" class="w-full px-3 py-1.5 rounded-lg bg-dark-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
+            </div>
+          </div>
+
+          <!-- Inline Test Output Box -->
+          <div id="modal-prov-test-result" class="hidden p-3 rounded-xl text-xs font-mono border"></div>
+
+          <!-- Footer Actions -->
+          <div class="flex items-center justify-between pt-4 border-t border-slate-800">
+            <button type="button" id="btn-modal-test-prov" onclick="testModalProviderConnectivity()" class="px-3.5 py-2 rounded-xl bg-dark-800 hover:bg-dark-750 text-slate-200 text-xs font-semibold border border-slate-700 transition-all flex items-center gap-1.5 active:scale-95">
+              <i data-lucide="activity" class="w-3.5 h-3.5 text-cyan-400"></i> Test Connection
+            </button>
+            <div class="flex items-center gap-2">
+              <button type="button" onclick="closeModal('modal-provider-config')" class="px-4 py-2 rounded-xl bg-dark-800 hover:bg-dark-750 border border-slate-700 text-slate-300 text-xs font-semibold">
+                Cancel
+              </button>
+              <button type="submit" id="btn-save-prov-modal" class="px-5 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow-md shadow-brand-600/30 flex items-center gap-1.5 active:scale-95 transition-all">
+                <i data-lucide="save" class="w-3.5 h-3.5"></i> Save Settings
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <!-- AUTONOMOUS IP REMEDIATION & DELISTING AGENT MODAL -->
     <div id="modal-intel-remediation" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md overflow-y-auto">
       <div class="w-full max-w-4xl max-h-[92vh] flex flex-col rounded-2xl bg-dark-850 border border-amber-500/30 shadow-2xl overflow-hidden my-auto">
@@ -2427,8 +2546,8 @@
   <div id="toast-container" class="fixed bottom-5 right-5 z-50 space-y-2"></div>
 
   <!-- APPLICATION SCRIPTS -->
-  <script src="/static/js/app.js?v=2.2.0"></script>
-  <script src="/static/js/security.js?v=2.2.0"></script>
-  <script src="/static/js/ip_intel.js?v=2.2.0"></script>
+  <script src="/static/js/app.js?v=2.3.0"></script>
+  <script src="/static/js/security.js?v=2.3.0"></script>
+  <script src="/static/js/ip_intel.js?v=2.3.0"></script>
 </body>
 </html>

@@ -110,26 +110,46 @@
 }
 
 /* ============================================================================
-   UI PERFORMANCE & RESPONSIVENESS ENHANCEMENTS
+   UI PERFORMANCE & RESPONSIVENESS ENHANCEMENTS (MODERN WEB GUIDANCE)
    ============================================================================ */
-/* Virtualize / accelerate long tables */
+/* Isolate layout calculations in complex grids and cards */
+.metric-card,
+#intel-providers-container > div,
+.intel-subtab-view,
+.tab-content > div {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 240px auto 400px;
+}
+
+@supports not (content-visibility: auto) {
+  .metric-card,
+  #intel-providers-container > div,
+  .intel-subtab-view {
+    contain: layout style paint;
+  }
+}
+
+/* Virtualize / accelerate table rendering */
 table {
   contain: layout style;
 }
 
 table tbody tr {
   contain: layout style paint;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 40px;
 }
 
-/* Fast GPU composite for active modals and cards */
-.metric-card, .tab-btn {
-  will-change: transform;
+/* Fast GPU composite for active modals, interactive buttons, and cards */
+.metric-card, .tab-btn, button {
+  will-change: transform, opacity;
   backface-visibility: hidden;
 }
 
 /* Smooth tab switching without reflow jumps */
 main > section.tab-content {
   animation: tabFadeIn 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+  contain: layout style;
 }
 
 @keyframes tabFadeIn {

@@ -431,7 +431,7 @@ async def update_provider(
 async def test_provider(
     provider_id: str,
     db: DatabaseManager = Depends(get_db),
-    user: UserResponse = Depends(require_admin)
+    user: UserResponse = Depends(require_read_or_admin)
 ):
     prov = db.get_provider_raw(provider_id)
     if not prov:

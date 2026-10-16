@@ -44,18 +44,38 @@ function renderIcons(target = null) {
   if (!window.lucide || typeof lucide.createIcons !== 'function') return;
   try {
     if (target && target.nodeType === Node.ELEMENT_NODE) {
-      lucide.createIcons({ root: target });
+      if (typeof window._lucideOriginalCreateIcons === 'function') {
+        window._lucideOriginalCreateIcons({ root: target });
+      } else {
+        lucide.createIcons({ root: target });
+      }
       return;
     }
     if (window._lucideRafId) cancelAnimationFrame(window._lucideRafId);
     window._lucideRafId = requestAnimationFrame(() => {
-      lucide.createIcons();
+      if (typeof window._lucideOriginalCreateIcons === 'function') {
+        window._lucideOriginalCreateIcons();
+      } else {
+        lucide.createIcons();
+      }
     });
   } catch (err) {
     // Graceful fallback
   }
 }
 window.renderIcons = renderIcons;
+
+// Automatically patch window.lucide.createIcons to debounce bare invocations
+if (window.lucide && typeof window.lucide.createIcons === 'function' && !window._lucideOriginalCreateIcons) {
+  window._lucideOriginalCreateIcons = window.lucide.createIcons;
+  window.lucide.createIcons = function(options) {
+    if (options && options.root) {
+      window._lucideOriginalCreateIcons(options);
+      return;
+    }
+    renderIcons();
+  };
+}
 
 // ============================================================================
 // AUTHENTICATION & SESSION MANAGEMENT HELPERS

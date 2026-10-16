@@ -51,15 +51,19 @@ function switchIntelSubTab(subTabId) {
     }
   });
 
+  let activeView = null;
   document.querySelectorAll(".intel-subtab-view").forEach(view => {
     if (view.id === `intel-view-${subTabId}`) {
       view.classList.remove("hidden");
+      activeView = view;
     } else {
       view.classList.add("hidden");
     }
   });
 
-  if (window.lucide) lucide.createIcons();
+  if (activeView && typeof renderIcons === "function") {
+    renderIcons(activeView);
+  }
 
   if (subTabId === "overview") {
     loadIPIntelOverview();
@@ -887,9 +891,29 @@ async function loadIPIntelHistory() {
 // ---------------------------------------------------------------------------
 // 6. PROVIDER MANAGEMENT
 // ---------------------------------------------------------------------------
+let _allProvidersCache = [];
+
 async function loadIPIntelProviders() {
   const container = document.getElementById("intel-providers-container");
   if (!container) return;
+
+  // Stale-while-revalidate client cache for instant subtab rendering
+  if (typeof getCachedData === "function") {
+    const cached = getCachedData("intel-providers", 45000);
+    if (cached && Array.isArray(cached) && cached.length) {
+      _allProvidersCache = cached;
+      renderProvidersGrid(cached, container);
+    }
+  }
+
+  if (!container.children.length) {
+    container.innerHTML = `
+      <div class="col-span-full py-12 flex flex-col items-center justify-center text-slate-400">
+        <div class="w-8 h-8 border-2 border-brand-500/20 border-t-brand-500 rounded-full animate-spin mb-3"></div>
+        <span class="text-xs">Loading threat intelligence providers...</span>
+      </div>
+    `;
+  }
 
   try {
     const res = await fetch("/api/ip-intelligence/providers", {
@@ -897,67 +921,334 @@ async function loadIPIntelProviders() {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const provs = await res.json();
-
-    container.innerHTML = provs.map(p => `
-      <div class="p-5 rounded-xl bg-dark-800/90 border border-slate-700/80 shadow-lg flex flex-col justify-between">
-        <div>
-          <div class="flex items-center justify-between mb-3">
-            <div class="flex items-center gap-2">
-              <span class="w-3 h-3 rounded-full ${p.enabled ? 'bg-emerald-400' : 'bg-slate-500'}"></span>
-              <h4 class="font-bold text-white text-sm">${p.provider_name}</h4>
-            </div>
-            <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-              p.provider_type === 'dnsbl' ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20' :
-              (p.provider_type === 'abuse_api' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
-              (p.provider_type === 'gaming_intel' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-purple-500/10 text-purple-400 border border-purple-500/20'))
-            }">
-              ${p.provider_type === 'gaming_intel' ? 'GAMING & ANTI-CHEAT' : p.provider_type}
-            </span>
-          </div>
-
-          <p class="text-xs text-slate-300 mb-3">${p.terms_notice || 'Real-time reputation intelligence lookup.'}</p>
-
-          <div class="space-y-1.5 text-xs text-slate-400 font-mono mb-4 bg-dark-850 p-3 rounded-lg border border-slate-800">
-            <div>Auth: <span class="text-slate-200">${p.auth_method}</span></div>
-            <div>Key: <span class="text-slate-200">${p.has_api_key ? p.api_key_masked : 'None / Not Required'}</span></div>
-            <div>Timeout: <span class="text-slate-200">${p.timeout_seconds}s</span> | Rate Limit: <span class="text-slate-200">${p.rate_limit_rpm} rpm</span></div>
-            ${p.dns_zone ? `<div>Zone: <span class="text-cyan-300">${p.dns_zone}</span></div>` : ''}
-            ${p.last_error ? `<div class="text-rose-400 text-[11px] font-sans mt-1">⚠️ Error: ${p.last_error}</div>` : ''}
-          </div>
-        </div>
-
-        <div class="flex items-center justify-between pt-3 border-t border-slate-700/60">
-          <button onclick="testProviderConnectivity('${p.provider_id}')" class="px-3 py-1.5 rounded bg-dark-700 hover:bg-dark-600 text-slate-200 text-xs font-semibold border border-slate-600 transition-all flex items-center gap-1.5">
-            <i data-lucide="activity" class="w-3.5 h-3.5 text-cyan-400"></i> Test
-          </button>
-          <button onclick="openProviderEditModal('${p.provider_id}')" class="px-3 py-1.5 rounded bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold transition-all shadow-md shadow-brand-600/20">
-            Configure
-          </button>
-        </div>
-      </div>
-    `).join("");
-
-    if (window.lucide) lucide.createIcons();
+    _allProvidersCache = provs;
+    if (typeof setCachedData === "function") {
+      setCachedData("intel-providers", provs);
+    }
+    renderProvidersGrid(provs, container);
   } catch (e) {
     console.error("Failed to load providers:", e);
+    if (!_allProvidersCache || !_allProvidersCache.length) {
+      container.innerHTML = `<div class="col-span-full p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs">Failed to load providers: ${e.message}</div>`;
+    }
+  }
+}
+
+function renderProvidersGrid(provs, container) {
+  container.innerHTML = provs.map(p => `
+    <div class="p-5 rounded-xl bg-dark-800/90 border border-slate-700/80 shadow-lg flex flex-col justify-between hover:border-slate-600 transition-all">
+      <div>
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-full ${p.enabled ? 'bg-emerald-400 ring-2 ring-emerald-400/20' : 'bg-slate-500'}"></span>
+            <h4 class="font-bold text-white text-sm">${p.provider_name}</h4>
+          </div>
+          <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+            p.provider_type === 'dnsbl' ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20' :
+            (p.provider_type === 'abuse_api' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
+            (p.provider_type === 'gaming_intel' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-purple-500/10 text-purple-400 border border-purple-500/20'))
+          }">
+            ${p.provider_type === 'gaming_intel' ? 'GAMING & ANTI-CHEAT' : p.provider_type}
+          </span>
+        </div>
+
+        <p class="text-xs text-slate-300 mb-3">${p.terms_notice || 'Real-time reputation intelligence lookup.'}</p>
+
+        <div class="space-y-1.5 text-xs text-slate-400 font-mono mb-4 bg-dark-850 p-3 rounded-lg border border-slate-800">
+          <div>Auth: <span class="text-slate-200">${p.auth_method}</span></div>
+          <div>Key: <span class="${p.has_api_key ? 'text-emerald-300' : 'text-slate-400'}">${p.has_api_key ? p.api_key_masked : 'None / Not Required'}</span></div>
+          <div>Timeout: <span class="text-slate-200">${p.timeout_seconds}s</span> | Rate: <span class="text-slate-200">${p.rate_limit_rpm} rpm</span></div>
+          ${p.dns_zone ? `<div>Zone: <span class="text-cyan-300">${p.dns_zone}</span></div>` : ''}
+          ${p.last_error ? `<div class="text-rose-400 text-[11px] font-sans mt-1">⚠️ Error: ${p.last_error}</div>` : ''}
+        </div>
+      </div>
+
+      <div>
+        <div class="flex items-center justify-between pt-3 border-t border-slate-700/60">
+          <button id="btn-test-prov-${p.provider_id}" onclick="testProviderConnectivity('${p.provider_id}')" class="px-3.5 py-1.5 rounded-lg bg-dark-700 hover:bg-dark-600 text-slate-200 text-xs font-semibold border border-slate-600 transition-all flex items-center gap-1.5 active:scale-95">
+            <i data-lucide="activity" class="w-3.5 h-3.5 text-cyan-400"></i> Test
+          </button>
+          <button onclick="openProviderEditModal('${p.provider_id}')" class="px-3.5 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold transition-all shadow-md shadow-brand-600/20 active:scale-95 flex items-center gap-1.5">
+            <i data-lucide="settings" class="w-3.5 h-3.5"></i> Configure
+          </button>
+        </div>
+        <div id="prov-test-badge-${p.provider_id}" class="hidden mt-2 p-2 rounded-lg text-[11px] font-mono border"></div>
+      </div>
+    </div>
+  `).join("");
+
+  if (typeof renderIcons === "function") {
+    renderIcons(container);
   }
 }
 
 async function testProviderConnectivity(providerId) {
-  showIntelToast(`Testing ${providerId}...`);
+  const btn = document.getElementById(`btn-test-prov-${providerId}`);
+  const badge = document.getElementById(`prov-test-badge-${providerId}`);
+  
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin text-cyan-400"></i> Testing...`;
+    if (typeof renderIcons === "function") renderIcons(btn);
+  }
+  if (badge) {
+    badge.className = "mt-2 p-2 rounded-lg text-[11px] font-mono border bg-dark-900 border-slate-700 text-slate-400 flex items-center gap-2";
+    badge.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin text-cyan-400"></i> Querying provider health probe...`;
+    badge.classList.remove("hidden");
+    if (typeof renderIcons === "function") renderIcons(badge);
+  }
+
+  showIntelToast(`Testing connectivity for ${providerId}...`);
+
   try {
     const res = await fetch(`/api/ip-intelligence/providers/${providerId}/test`, {
       method: "POST",
       headers: getAuthHeaders()
     });
     const data = await res.json();
-    if (data.online) {
-      showIntelToast(`[✓] ${providerId} is online! Latency: ${data.latency_ms || 0}ms`);
+    
+    if (res.ok && data.online) {
+      const latencyStr = data.latency_ms !== undefined ? `${data.latency_ms}ms` : 'OK';
+      const msg = `Online (${latencyStr}) • ${data.status || 'Healthy'}`;
+      if (badge) {
+        badge.className = "mt-2 p-2 rounded-lg text-[11px] font-mono border bg-emerald-500/10 border-emerald-500/30 text-emerald-300 flex items-center justify-between";
+        badge.innerHTML = `<span>✓ ${msg}</span><span class="text-[10px] text-emerald-400 font-bold">${latencyStr}</span>`;
+      }
+      showIntelToast(`[✓] ${providerId}: ${msg}`);
     } else {
-      showIntelToast(`[!] ${providerId} status: ${data.status || 'Offline'} - ${data.message || ''}`, true);
+      const errMsg = data.message || data.detail || data.status || 'Offline';
+      const isConfigIssue = data.status === 'awaiting_credentials' || (typeof errMsg === 'string' && (errMsg.includes('API key') || errMsg.includes('credentials')));
+      if (badge) {
+        badge.className = `mt-2 p-2 rounded-lg text-[11px] font-mono border ${isConfigIssue ? 'bg-amber-500/10 border-amber-500/30 text-amber-300' : 'bg-rose-500/10 border-rose-500/30 text-rose-300'} flex items-center justify-between`;
+        badge.innerHTML = `<span>${isConfigIssue ? '⚠️' : '✖'} ${errMsg}</span><button onclick="openProviderEditModal('${providerId}')" class="text-[10px] underline hover:text-white font-bold ml-2">Configure</button>`;
+      }
+      showIntelToast(`[!] ${providerId}: ${errMsg}`, true);
     }
   } catch (e) {
+    if (badge) {
+      badge.className = "mt-2 p-2 rounded-lg text-[11px] font-mono border bg-rose-500/10 border-rose-500/30 text-rose-300";
+      badge.innerHTML = `<span>✖ Network error: ${e.message}</span>`;
+    }
     showIntelToast(`Test failed: ${e.message}`, true);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `<i data-lucide="activity" class="w-3.5 h-3.5 text-cyan-400"></i> Test`;
+      if (typeof renderIcons === "function") renderIcons(btn);
+    }
+    if (badge && typeof renderIcons === "function") renderIcons(badge);
+  }
+}
+
+async function openProviderEditModal(providerId) {
+  let p = _allProvidersCache.find(x => x.provider_id === providerId);
+  if (!p) {
+    try {
+      const res = await fetch("/api/ip-intelligence/providers", { headers: getAuthHeaders() });
+      if (res.ok) {
+        _allProvidersCache = await res.json();
+        p = _allProvidersCache.find(x => x.provider_id === providerId);
+      }
+    } catch (e) {}
+  }
+  if (!p) {
+    showIntelToast(`Provider '${providerId}' not found`, true);
+    return;
+  }
+
+  const modal = document.getElementById("modal-provider-config");
+  if (!modal) return;
+
+  document.getElementById("modal-prov-id").value = p.provider_id;
+  document.getElementById("modal-prov-title").textContent = `Configure ${p.provider_name}`;
+  
+  const typeBadge = document.getElementById("modal-prov-type-badge");
+  if (typeBadge) {
+    typeBadge.textContent = p.provider_type === 'gaming_intel' ? 'GAMING & ANTI-CHEAT' : p.provider_type.toUpperCase();
+  }
+
+  document.getElementById("modal-prov-subtitle").textContent = p.terms_notice || p.documentation_url || "Reputation intelligence provider configuration.";
+  document.getElementById("modal-prov-enabled").checked = Boolean(p.enabled);
+
+  // Key handling
+  const keyInput = document.getElementById("modal-prov-key");
+  const keyStatus = document.getElementById("modal-prov-key-status");
+  keyInput.value = "";
+  keyInput.type = "password";
+  
+  if (p.auth_method === "none" && !p.has_api_key && p.provider_type === "dnsbl") {
+    keyStatus.textContent = "Not Required (DNSBL Mode)";
+    keyInput.placeholder = "Optional Data Query Service (DQS) key if subscribed...";
+  } else if (p.has_api_key) {
+    keyStatus.textContent = `Configured: ${p.api_key_masked}`;
+    keyInput.placeholder = "Enter new key to overwrite, or leave blank to keep current...";
+  } else {
+    keyStatus.textContent = "Not Configured";
+    keyInput.placeholder = "Enter API key / secret token...";
+  }
+
+  // Zone vs Endpoint visibility
+  const zoneContainer = document.getElementById("modal-prov-zone-container");
+  const endpointContainer = document.getElementById("modal-prov-endpoint-container");
+  const zoneInput = document.getElementById("modal-prov-zone");
+  const endpointInput = document.getElementById("modal-prov-endpoint");
+
+  zoneInput.value = p.dns_zone || "";
+  endpointInput.value = p.api_endpoint || "";
+
+  if (p.dns_zone || p.provider_type === "dnsbl") {
+    zoneContainer.classList.remove("hidden");
+  } else {
+    zoneContainer.classList.add("hidden");
+  }
+
+  if (p.api_endpoint || p.provider_type !== "dnsbl") {
+    endpointContainer.classList.remove("hidden");
+  } else {
+    endpointContainer.classList.add("hidden");
+  }
+
+  document.getElementById("modal-prov-timeout").value = p.timeout_seconds || 5.0;
+  document.getElementById("modal-prov-ratelimit").value = p.rate_limit_rpm || 60;
+  document.getElementById("modal-prov-maxconcurrent").value = p.max_concurrent || 5;
+  document.getElementById("modal-prov-pos-ttl").value = p.cache_duration_positive_sec || 1800;
+  document.getElementById("modal-prov-neg-ttl").value = p.cache_duration_negative_sec || 7200;
+
+  // Reset test result inside modal
+  const testRes = document.getElementById("modal-prov-test-result");
+  if (testRes) {
+    testRes.classList.add("hidden");
+    testRes.innerHTML = "";
+  }
+
+  modal.classList.remove("hidden");
+  modal.classList.add("flex");
+  if (typeof renderIcons === "function") renderIcons(modal);
+}
+
+function toggleProvKeyVisibility() {
+  const input = document.getElementById("modal-prov-key");
+  const eye = document.getElementById("modal-prov-key-eye");
+  if (!input) return;
+  if (input.type === "password") {
+    input.type = "text";
+    if (eye) eye.setAttribute("data-lucide", "eye-off");
+  } else {
+    input.type = "password";
+    if (eye) eye.setAttribute("data-lucide", "eye");
+  }
+  if (typeof renderIcons === "function") renderIcons(input.parentElement);
+}
+
+async function saveProviderConfig(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  const providerId = document.getElementById("modal-prov-id").value;
+  if (!providerId) return;
+
+  const saveBtn = document.getElementById("btn-save-prov-modal");
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i> Saving...`;
+    if (typeof renderIcons === "function") renderIcons(saveBtn);
+  }
+
+  const payload = {
+    enabled: document.getElementById("modal-prov-enabled").checked,
+    timeout_seconds: parseFloat(document.getElementById("modal-prov-timeout").value) || 5.0,
+    rate_limit_rpm: parseInt(document.getElementById("modal-prov-ratelimit").value, 10) || 60,
+    max_concurrent: parseInt(document.getElementById("modal-prov-maxconcurrent").value, 10) || 5,
+    cache_duration_positive_sec: parseInt(document.getElementById("modal-prov-pos-ttl").value, 10) || 1800,
+    cache_duration_negative_sec: parseInt(document.getElementById("modal-prov-neg-ttl").value, 10) || 7200
+  };
+
+  const keyVal = document.getElementById("modal-prov-key").value.trim();
+  if (keyVal) {
+    payload.api_key = keyVal;
+  }
+
+  const zoneVal = document.getElementById("modal-prov-zone").value.trim();
+  if (zoneVal) {
+    payload.dns_zone = zoneVal;
+  }
+
+  const endpointVal = document.getElementById("modal-prov-endpoint").value.trim();
+  if (endpointVal) {
+    payload.api_endpoint = endpointVal;
+  }
+
+  try {
+    const res = await fetch(`/api/ip-intelligence/providers/${providerId}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+
+    showIntelToast(`Provider '${providerId}' updated successfully!`);
+    closeModal("modal-provider-config");
+    if (window._clientDataCache) window._clientDataCache.delete("intel-providers");
+    await loadIPIntelProviders();
+  } catch (err) {
+    showIntelToast(`Save failed: ${err.message}`, true);
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = `<i data-lucide="save" class="w-3.5 h-3.5"></i> Save Settings`;
+      if (typeof renderIcons === "function") renderIcons(saveBtn);
+    }
+  }
+}
+
+async function testModalProviderConnectivity() {
+  const providerId = document.getElementById("modal-prov-id").value;
+  if (!providerId) return;
+
+  const btn = document.getElementById("btn-modal-test-prov");
+  const resultBox = document.getElementById("modal-prov-test-result");
+  if (!btn || !resultBox) return;
+
+  btn.disabled = true;
+  btn.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin text-cyan-400"></i> Testing...`;
+  resultBox.classList.remove("hidden");
+  resultBox.className = "p-3 rounded-xl text-xs font-mono border bg-dark-900 border-slate-700 text-slate-300 flex items-center gap-2";
+  resultBox.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin text-cyan-400"></i> Sending health probe to ${providerId}...`;
+  if (typeof renderIcons === "function") {
+    renderIcons(resultBox);
+    renderIcons(btn);
+  }
+
+  try {
+    const res = await fetch(`/api/ip-intelligence/providers/${providerId}/test`, {
+      method: "POST",
+      headers: getAuthHeaders()
+    });
+    const data = await res.json();
+    if (res.ok && data.online) {
+      const latStr = data.latency_ms !== undefined ? `${data.latency_ms}ms` : 'OK';
+      resultBox.className = "p-3 rounded-xl text-xs font-mono border bg-emerald-500/10 border-emerald-500/30 text-emerald-300 flex items-center justify-between";
+      resultBox.innerHTML = `<span>✓ Connectivity verified! (${data.status || 'healthy'})</span><span class="font-bold">${latStr}</span>`;
+    } else {
+      const msg = data.message || data.detail || data.status || 'Offline';
+      resultBox.className = "p-3 rounded-xl text-xs font-mono border bg-rose-500/10 border-rose-500/30 text-rose-300 flex items-center justify-between";
+      resultBox.innerHTML = `<span>✖ Health check alert: ${msg}</span><span class="font-bold">${data.latency_ms !== undefined ? data.latency_ms + 'ms' : 'Error'}</span>`;
+    }
+  } catch (e) {
+    resultBox.className = "p-3 rounded-xl text-xs font-mono border bg-rose-500/10 border-rose-500/30 text-rose-300";
+    resultBox.innerHTML = `<span>✖ Request failed: ${e.message}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = `<i data-lucide="activity" class="w-3.5 h-3.5 text-cyan-400"></i> Test Connection`;
+    if (typeof renderIcons === "function") {
+      renderIcons(btn);
+      renderIcons(resultBox);
+    }
   }
 }
 

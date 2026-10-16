@@ -476,7 +476,11 @@ async def test_ip_intel_api_overview_and_check(admin_headers, analyst_headers):
         assert len(provs) >= 9
         assert any(p["provider_id"] == "gaming_compat" for p in provs)
 
-        # Admin tests provider connectivity (rDNS and gaming_compat)
+        # Analyst and Admin can test provider connectivity (rDNS and gaming_compat)
+        res_test_analyst = await client.post("/api/ip-intelligence/providers/rdns_ptr/test", headers=analyst_headers)
+        assert res_test_analyst.status_code == 200
+        assert res_test_analyst.json()["provider_id"] == "rdns_ptr"
+
         res_test = await client.post("/api/ip-intelligence/providers/rdns_ptr/test", headers=admin_headers)
         assert res_test.status_code == 200
         assert res_test.json()["provider_id"] == "rdns_ptr"
@@ -484,6 +488,22 @@ async def test_ip_intel_api_overview_and_check(admin_headers, analyst_headers):
         res_test_gaming = await client.post("/api/ip-intelligence/providers/gaming_compat/test", headers=admin_headers)
         assert res_test_gaming.status_code == 200
         assert res_test_gaming.json()["provider_id"] == "gaming_compat"
+
+        # Updating provider config (Analyst forbidden, Admin allowed)
+        res_upd_unauth = await client.put(
+            "/api/ip-intelligence/providers/spamcop",
+            headers=analyst_headers,
+            json={"timeout_seconds": 6.5}
+        )
+        assert res_upd_unauth.status_code == 403
+
+        res_upd_admin = await client.put(
+            "/api/ip-intelligence/providers/spamcop",
+            headers=admin_headers,
+            json={"timeout_seconds": 6.5, "rate_limit_rpm": 90}
+        )
+        assert res_upd_admin.status_code == 200
+        assert res_upd_admin.json()["success"] is True
 
         # 5. Online Gaming & Anti-Cheat Compatibility endpoint
         res_gaming = await client.get("/api/ip-intelligence/ip/157.119.69.129/gaming", headers=analyst_headers)
