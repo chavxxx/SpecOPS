@@ -27,14 +27,11 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing WISPnet Security Platform Database...")
     db = get_db()
     
-    # Purge any legacy simulated flow records
+    # Quick non-blocking maintenance: enforce rolling flow retention on startup
     try:
-        with db._get_connection() as conn:
-            c = conn.cursor()
-            c.execute("DELETE FROM flow_records WHERE flow_id LIKE 'flow-sim-%';")
-            conn.commit()
+        db.prune_flow_records(max_age_hours=24, max_records=250000)
     except Exception as e:
-        logger.debug(f"Flow purge note: {e}")
+        logger.debug(f"Startup flow retention note: {e}")
 
     logger.info("Starting Security Background Telemetry & Scan Worker...")
     worker = get_security_worker()

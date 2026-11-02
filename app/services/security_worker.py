@@ -17,11 +17,13 @@ class SecurityBackgroundWorker:
         self.opensearch = OpenSearchAdapter(db=self.db)
         self.running = False
         self._task: Optional[asyncio.Task] = None
+        self._iteration_count = 0
 
     async def start(self, interval_seconds: int = 10):
         if self.running:
             return
         self.running = True
+        self._iteration_count = 0
         self._task = asyncio.create_task(self._run_loop(interval_seconds))
         logger.info("Security background worker started")
 
@@ -55,6 +57,13 @@ class SecurityBackgroundWorker:
                     active_scan = cursor.fetchone()
                     if active_scan:
                         scanner.start_bulk_scan_job(active_scan[0])
+
+                # 4. Periodic rolling flow retention pruning every 60 iterations (~10 mins)
+                self._iteration_count += 1
+                if self._iteration_count % 60 == 0:
+                    pruned = self.db.prune_flow_records(max_age_hours=24, max_records=250000)
+                    if pruned > 0:
+                        logger.info(f"Pruned {pruned} stale NetFlow records from SQLite storage")
 
             except Exception as e:
                 logger.error(f"Error in security background worker: {e}")

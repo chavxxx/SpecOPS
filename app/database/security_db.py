@@ -1713,4 +1713,36 @@ class SecurityDatabaseMixin:
             conn.commit()
             return cursor.rowcount
 
+    def prune_flow_records(self, max_age_hours: int = 24, max_records: int = 250000) -> int:
+        """
+        Enforces carrier-grade rolling retention for NetFlow / IPFIX storage in SQLite.
+        Prunes records older than max_age_hours, and ensures table does not exceed max_records.
+        Prevents SQLite database bloat and disk full conditions.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            # 1. Prune records older than retention threshold
+            cursor.execute("""
+                DELETE FROM flow_records 
+                WHERE timestamp < datetime('now', '-' || ? || ' hours');
+            """, (max_age_hours,))
+            pruned_count = cursor.rowcount
+
+            # 2. Hard record cap check
+            cursor.execute("SELECT count(*) FROM flow_records;")
+            total = cursor.fetchone()[0]
+            if total > max_records:
+                excess = total - max_records
+                cursor.execute("""
+                    DELETE FROM flow_records 
+                    WHERE flow_id IN (
+                        SELECT flow_id FROM flow_records 
+                        ORDER BY timestamp ASC LIMIT ?
+                    );
+                """, (excess,))
+                pruned_count += cursor.rowcount
+
+            conn.commit()
+            return pruned_count
+
 

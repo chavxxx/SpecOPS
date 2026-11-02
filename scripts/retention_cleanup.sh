@@ -49,7 +49,12 @@ WHERE ended_at IS NOT NULL
   AND ended_at < datetime('now', '-${AUDIT_LOGS_RETENTION_DAYS} days');
 SELECT 'Pruned stale historical subscriber sessions older than ${AUDIT_LOGS_RETENTION_DAYS} days: ' || changes();
 
--- 5. Reclaim free space and optimize SQLite query planner
+-- 5. Prune NetFlow / IPFIX records older than 24 hours
+DELETE FROM flow_records 
+WHERE timestamp < datetime('now', '-24 hours');
+SELECT 'Pruned flow_records older than 24 hours: ' || changes();
+
+-- 6. Reclaim free space and optimize SQLite query planner
 PRAGMA optimize;
 EOF
 
